@@ -94,33 +94,11 @@ python3 -m venv .venv
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m pytest
-PYTHONPATH=src .venv/bin/python -m fukikae_studio --help
 ```
 
-## xAI API Keyの設定
+## 起動
 
-`.env.example`をコピーして、自分のAPI Keyを入れます。
-
-```bash
-cp .env.example env.local.
-```
-
-`env.local.`の例:
-
-```bash
-XAI_API_KEY=your_xai_api_key_here
-XAI_BASE_URL=https://api.x.ai/v1
-XAI_TEXT_MODEL=grok-4.3
-XAI_STT_LANGUAGE=auto
-XAI_TTS_VOICE=d0cb9ff07d95
-XAI_TTS_LANGUAGE=ja
-```
-
-`env.local.`は`.gitignore`対象です。GitHubへpushしないでください。
-
-## 使い方: Local Web UI
-
-一番簡単な使い方です。
+ローカルWeb UIを起動します。
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m fukikae_studio studio
@@ -132,62 +110,20 @@ PYTHONPATH=src .venv/bin/python -m fukikae_studio studio
 http://127.0.0.1:8765/?key=...
 ```
 
+## 使い方
+
 画面で行うこと:
 
 1. 実行モードで`Live xAIモード`を選ぶ。
 2. `File open`でソース動画を選ぶ。
 3. プロジェクトディレクトリを指定する。
-4. `設定`を開いてxAI API Keyを入力する。
+4. `設定`を開いてxAI API Keyを入力する。このKeyは実行中だけ使い、画面へ再表示しません。
 5. Voiceを選ぶ。
 6. 字幕出力を選ぶ。
 7. `ローカルFFmpegで最終レンダーを実行`をONにする。
 8. `ローカルパイプラインを実行`を押す。
 
 `File open`で選んだ動画は外部にアップロードされません。localhostの`work/studio-uploads/`へローカルコピーされ、そのコピー先パスがフォームへ入ります。
-
-## 使い方: CLI Live xAI
-
-Web UIではなくCLIで実行する場合:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m fukikae_studio run-live \
-  --env-file ./env.local. \
-  --video /path/to/source.mp4 \
-  --project /tmp/fukikae-live-run \
-  --execute-ffmpeg \
-  --overwrite
-```
-
-字幕出力を指定できます。
-
-```bash
---subtitle-output both
---subtitle-output burned
---subtitle-output soft
-```
-
-デフォルトは`both`です。共有用には焼き込み字幕の`output/dubbed.ja.burned.mp4`を確認してください。
-
-## 使い方: APIなしのFixtureテスト
-
-xAI API Keyなしで、ローカルfixtureだけを使ったテストができます。
-
-```bash
-PYTHONPATH=src .venv/bin/python scripts/local_beta_smoke.py --keep
-```
-
-内部beta前の一括確認:
-
-```bash
-PYTHONPATH=src .venv/bin/python scripts/internal_beta_check.py
-```
-
-成功時は次のように表示されます。
-
-```text
-Internal beta preflight: GO
-GO: local internal beta checks passed.
-```
 
 ## 出力ファイル
 
@@ -221,14 +157,13 @@ GO: local internal beta checks passed.
 - このalphaはローカル実行前提です。
 - localhost以外へのbindは拒否します。
 - API Keyは画面へ再表示しません。
-- `work/`、`test_temp/`、`.venv/`、`env.local*`は配布対象外です。
+- API Keyを含むファイル、`work/`、`test_temp/`、`.venv/`は配布対象外です。
 - 生成結果の品質は、入力音声、STT品質、翻訳長、TTS voice、FFmpeg環境に左右されます。
 - xAIの料金とモデル提供状況は変わる可能性があります。最新情報は[xAI Pricing](https://docs.x.ai/developers/pricing)を確認してください。
 
 ## 開発者向けドキュメント
 
 - [Solo Local Beta Test](docs/SOLO_BETA_TEST.md)
-- [CLI MVP](docs/CLI_MVP.md)
 - [App Shape Research](docs/APP_SHAPE_RESEARCH.md)
 - [Provider Policy](docs/PROVIDER_POLICY.md)
 - [xAI Endpoint Notes](docs/XAI_ENDPOINT_NOTES.md)
