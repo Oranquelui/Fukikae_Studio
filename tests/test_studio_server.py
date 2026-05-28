@@ -19,27 +19,25 @@ from fukikae_studio.web.studio import (
 )
 
 
-def test_render_studio_home_exposes_local_fixture_backed_controls():
+def test_render_studio_home_exposes_live_xai_controls_without_fixture_mode():
     defaults = {
         "video": "work/local-smoke/source.mp4",
         "project": "work/local-smoke/project",
-        "stt_fixture_response": "tests/fixtures/sample_stt_response.json",
-        "dubbing_fixture_response": "tests/fixtures/sample_dubbing_response.json",
-        "fixture_audio": "work/local-smoke/fixture.wav",
     }
 
     html = render_studio_home(defaults, access_key="abc123")
 
     assert "FukiKae Studio ローカルWeb Alpha" in html
     assert "background: #ffffff" in html
-    assert "内部betaモード" in html
     assert "ローカル限定" in html
     assert "Live xAIモードでは、xAI STT・Grok・xAI TTSを使います" in html
-    assert "Fixtureモードでは、ローカルJSONとWAVを使います" in html
     assert "外部アップロードなし" in html
-    assert "ライブAPI呼び出しなし" in html
-    assert "APIキー不要" in html
+    assert "Fixtureモード" not in html
+    assert "ローカルJSONとWAV" not in html
+    assert "ライブAPI呼び出しなし" not in html
+    assert "APIキー不要" not in html
     assert 'action="/run?key=abc123"' in html
+    assert 'type="hidden" name="run_mode" value="live"' in html
     assert 'name="video"' in html
     assert 'id="source-video-path"' in html
     assert 'id="source-video-file"' in html
@@ -65,15 +63,14 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert '<option value="both" selected>両方</option>' in html
     assert '<option value="burned">焼き込み字幕（共有用）</option>' in html
     assert '<option value="soft">ソフト字幕（編集用）</option>' in html
-    assert '<select name="run_mode">' in html
-    assert '<option value="live" selected>Live xAIモード</option>' in html
-    assert '<option value="fixture">Fixture betaモード</option>' in html
-    assert 'data-mode-section="fixture"' in html
+    assert '<select name="run_mode">' not in html
+    assert '<option value="fixture">Fixture betaモード</option>' not in html
+    assert 'data-mode-section="fixture"' not in html
     assert '<section class="notice" data-mode-section="live">' not in html
-    assert '<details class="settings-panel" data-mode-section="live">' in html
+    assert '<details class="settings-panel">' in html
     assert "<summary>設定</summary>" in html
     assert "<h2>Live xAI設定</h2>" in html
-    assert "toggleModeSections" in html
+    assert "toggleModeSections" not in html
     assert "startPipelineRun" in html
     assert "renderProgressGraph" in html
     assert 'id="pipeline-progress-panel"' in html
@@ -246,7 +243,8 @@ def test_run_endpoint_preserves_submitted_paths_after_error(tmp_path):
     handler = make_studio_handler(
         {"video": "", "project": "work/local-smoke/project"},
         access_key="abc123",
-        pipeline_runner=failing_pipeline,
+        live_pipeline_runner=failing_pipeline,
+        client_factory=lambda config: object(),
     )
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -254,12 +252,9 @@ def test_run_endpoint_preserves_submitted_paths_after_error(tmp_path):
     try:
         body = urllib.parse.urlencode(
             {
-                "run_mode": "fixture",
                 "video": str(submitted_video),
                 "project": str(submitted_project),
-                "stt_fixture_response": str(tmp_path / "stt.json"),
-                "dubbing_fixture_response": str(tmp_path / "dubbing.json"),
-                "fixture_audio": str(tmp_path / "fixture.wav"),
+                "xai_api_key": "unit-test-secret",
                 "source_lang": "auto",
                 "target_lang": "ja",
                 "voice": "d0cb9ff07d95",
@@ -312,19 +307,21 @@ def test_run_endpoint_can_start_async_job_and_report_progress(tmp_path):
             }
         }
 
-    handler = make_studio_handler({}, access_key="abc123", pipeline_runner=slow_pipeline)
+    handler = make_studio_handler(
+        {},
+        access_key="abc123",
+        live_pipeline_runner=slow_pipeline,
+        client_factory=lambda config: object(),
+    )
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         body = urllib.parse.urlencode(
             {
-                "run_mode": "fixture",
                 "video": str(source_video),
                 "project": str(project_dir),
-                "stt_fixture_response": str(tmp_path / "stt.json"),
-                "dubbing_fixture_response": str(tmp_path / "dubbing.json"),
-                "fixture_audio": str(tmp_path / "fixture.wav"),
+                "xai_api_key": "unit-test-secret",
                 "source_lang": "auto",
                 "target_lang": "ja",
                 "voice": "d0cb9ff07d95",
@@ -368,15 +365,20 @@ def test_run_endpoint_can_start_async_job_and_report_progress(tmp_path):
         server.server_close()
 
 
-def test_run_studio_form_uses_fixture_pipeline_and_returns_stage_statuses(tmp_path):
+def test_run_studio_form_uses_live_pipeline_and_returns_stage_statuses(tmp_path):
     calls = []
+    configs = []
     source_video = tmp_path / "source.mp4"
     project_dir = tmp_path / "project"
-    stt_fixture = tmp_path / "sample_stt_response.json"
-    dubbing_fixture = tmp_path / "sample_dubbing_response.json"
-    fixture_audio = tmp_path / "fixture.wav"
 
-    def fake_pipeline(project_dir_arg, **kwargs):
+    class FakeClient:
+        pass
+
+    def fake_client_factory(config):
+        configs.append(config)
+        return FakeClient()
+
+    def fake_live_pipeline(project_dir_arg, **kwargs):
         calls.append((project_dir_arg, kwargs))
         return {
             "validation": {
@@ -389,37 +391,40 @@ def test_run_studio_form_uses_fixture_pipeline_and_returns_stage_statuses(tmp_pa
 
     result = run_studio_form(
         {
+            "run_mode": "fixture",
             "video": str(source_video),
             "project": str(project_dir),
-            "stt_fixture_response": str(stt_fixture),
-            "dubbing_fixture_response": str(dubbing_fixture),
-            "fixture_audio": str(fixture_audio),
+            "xai_api_key": "unit-test-secret",
+            "xai_base_url": "https://api.x.ai/v1",
+            "xai_text_model": "grok-test",
             "source_lang": "auto",
             "target_lang": "ja",
             "voice": "b1a7441b97a1",
             "subtitle_output": "burned",
             "execute_ffmpeg": "on",
         },
-        pipeline_runner=fake_pipeline,
+        live_pipeline_runner=fake_live_pipeline,
+        client_factory=fake_client_factory,
     )
 
+    assert configs[0].api_key == "unit-test-secret"
     assert calls == [
         (
             project_dir,
             {
                 "source_video": source_video,
-                "stt_fixture_response": stt_fixture,
-                "dubbing_fixture_response": dubbing_fixture,
-                "fixture_audio": fixture_audio,
+                "client": configs and calls[0][1]["client"],
+                "text_model": "grok-test",
                 "source_lang": "auto",
                 "target_lang": "ja",
                 "voice": "b1a7441b97a1",
-                "subtitle_output": "burned",
                 "overwrite": False,
                 "execute_ffmpeg": True,
+                "subtitle_output": "burned",
             },
         )
     ]
+    assert isinstance(calls[0][1]["client"], FakeClient)
     assert result["status"] == "complete"
     assert result["output_mp4"] == str(project_dir / "output" / "dubbed.ja.mp4")
     assert result["validation_report"] == str(project_dir / "validation" / "local_test_report.json")
@@ -458,16 +463,15 @@ def test_run_studio_form_can_keep_only_final_mp4_for_web_output(tmp_path):
         {
             "video": str(source_video),
             "project": str(project_dir),
-            "stt_fixture_response": str(tmp_path / "stt.json"),
-            "dubbing_fixture_response": str(tmp_path / "dubbing.json"),
-            "fixture_audio": str(tmp_path / "fixture.wav"),
+            "xai_api_key": "unit-test-secret",
             "source_lang": "auto",
             "target_lang": "ja",
             "voice": "d0cb9ff07d95",
             "subtitle_output": "burned",
             "clean_output": "on",
         },
-        pipeline_runner=fake_pipeline,
+        live_pipeline_runner=fake_pipeline,
+        client_factory=lambda config: object(),
     )
 
     final_mp4 = project_dir / "dubbed.ja.burned.mp4"
@@ -596,4 +600,7 @@ def test_studio_command_help_exposes_localhost_web_alpha():
     assert result.returncode == 0, result.stderr
     assert "localhost Web UI alpha" in result.stdout
     assert "127.0.0.1" in result.stdout
-    assert "fixture-backed" in result.stdout
+    assert "fixture-backed" not in result.stdout
+    assert "--fixture-stt-response" not in result.stdout
+    assert "--fixture-dubbing-response" not in result.stdout
+    assert "--fixture-audio" not in result.stdout

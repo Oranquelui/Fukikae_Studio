@@ -20,20 +20,9 @@ FukiKae Studioは次の目的で作っています。
 
 - ローカルWeb UI alphaを起動して、ブラウザから動画を選択できます。
 - Live xAIモードで、xAI STT、Grok 4.3、xAI TTSを使った日本語吹き替えを生成できます。
-- Fixture betaモードで、APIなしのローカルテストを実行できます。
 - Sakura female / Japanese、Ren male / JapaneseなどのxAI Voiceを選択できます。
 - 焼き込み字幕、ソフト字幕、両方の出力を選べます。
-- 最終出力、検証レポート、中間artifactをローカルプロジェクトディレクトリに残します。
-
-## 画面イメージ
-
-メイン画面では、動画ファイル、出力先、Voice、字幕出力を選びます。API Key欄は初期表示では閉じています。
-
-![FukiKae Studio main screen](docs/assets/readme-main.jpg)
-
-`設定`を開くと、Live xAI用のAPI Keyとモデル設定を入力できます。API Keyは実行中だけ使い、画面へ再表示しません。
-
-![FukiKae Studio settings panel](docs/assets/readme-settings.jpg)
+- デフォルトでは完成MP4だけをローカルプロジェクトディレクトリに残します。
 
 ## 料金の考え方
 
@@ -124,34 +113,27 @@ http://127.0.0.1:8765/?key=...
 
 画面で行うこと:
 
-1. 実行モードで`Live xAIモード`を選ぶ。
-2. `File open`でソース動画を選ぶ。
-3. `Directory open`でプロジェクトディレクトリ（出力先）を選ぶ。
-4. `設定`を開いてxAI API Keyを入力する。このKeyは実行中だけ使い、画面へ再表示しません。
-5. Voiceを選ぶ。
-6. 字幕出力を選ぶ。
-7. `ローカルFFmpegで最終レンダーを実行`をONにする。
-8. `ローカルパイプラインを実行`を押す。
+1. `File open`でソース動画を選ぶ。
+2. `Directory open`でプロジェクトディレクトリ（出力先）を選ぶ。
+3. `設定`を開いてxAI API Keyを入力する。このKeyは実行中だけ使い、画面へ再表示しません。
+4. Voiceを選ぶ。
+5. 字幕出力を選ぶ。
+6. `ローカルFFmpegで最終レンダーを実行`をONにする。
+7. `ローカルパイプラインを実行`を押す。
 
 `File open`で選んだ動画は外部にアップロードされません。localhostの`work/studio-uploads/`へローカルコピーされ、そのコピー先パスがフォームへ入ります。
 `Directory open`はmacOSのフォルダ選択ダイアログを使い、選んだ出力先パスだけをローカルフォームへ入れます。
 
 ## 出力ファイル
 
-プロジェクトディレクトリ内に主なartifactが生成されます。
+デフォルトでは`完成後はMP4だけを残す`がONです。プロジェクトディレクトリ直下に、完成MP4だけが残ります。
 
-| パス | 内容 |
+| ファイル | 内容 |
 | --- | --- |
-| `input/source.mp4` | 入力動画コピー |
-| `audio/stt_input.wav` | STT用音声 |
-| `stt/normalized_segments.json` | 正規化された文字起こしセグメント |
-| `script/dubbing_segments.json` | Grokが生成した日本語吹き替えセグメント |
-| `tts/` | TTS音声とmanifest |
-| `assembly/japanese_subtitles.srt` | 日本語SRT字幕 |
-| `assembly/japanese_subtitles.ass` | 焼き込み用ASS字幕 |
-| `output/dubbed.ja.burned.mp4` | 焼き込み字幕つきMP4 |
-| `output/dubbed.ja.mp4` | ソフト字幕つきMP4 |
-| `validation/local_test_report.json` | 検証レポート |
+| `dubbed.ja.burned.mp4` | 焼き込み字幕つきMP4 |
+| `dubbed.ja.mp4` | ソフト字幕つきMP4 |
+
+中間artifactを確認したい場合は、`完成後はMP4だけを残す`をOFFにしてください。
 
 ## Voice
 

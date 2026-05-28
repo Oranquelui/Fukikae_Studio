@@ -18,10 +18,8 @@ from fukikae_studio.ai.xai_client import XAIClient
 from fukikae_studio.ai.xai_tts import BUILTIN_TTS_VOICES
 from fukikae_studio.config import DEFAULT_XAI_BASE_URL, DEFAULT_XAI_TEXT_MODEL, DEFAULT_XAI_TTS_VOICE, XAIConfig
 from fukikae_studio.pipeline.live_run import run_live_pipeline
-from fukikae_studio.pipeline.local_run import run_fixture_pipeline
 from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUBTITLE_OUTPUT_CHOICES
 
-PipelineRunner = Callable[..., Mapping[str, Any]]
 LivePipelineRunner = Callable[..., Mapping[str, Any]]
 ClientFactory = Callable[[XAIConfig], Any]
 DirectoryPicker = Callable[[Optional[str]], Optional[Path]]
@@ -67,14 +65,10 @@ def default_studio_form_values(repo_root: Optional[Path] = None) -> dict:
     return {
         "video": "",
         "project": str(root / "work" / "local-smoke" / "project"),
-        "stt_fixture_response": str(root / "tests" / "fixtures" / "sample_stt_response.json"),
-        "dubbing_fixture_response": str(root / "tests" / "fixtures" / "sample_dubbing_response.json"),
-        "fixture_audio": str(root / "work" / "local-smoke" / "fixture.wav"),
         "source_lang": "auto",
         "target_lang": "ja",
         "voice": DEFAULT_XAI_TTS_VOICE,
         "subtitle_output": DEFAULT_SUBTITLE_OUTPUT,
-        "run_mode": "live",
         "xai_base_url": DEFAULT_XAI_BASE_URL,
         "xai_text_model": DEFAULT_XAI_TEXT_MODEL,
         "clean_output": True,
@@ -323,13 +317,6 @@ def render_studio_home(
         showAsyncError(error.message || "ローカルパイプラインを開始できませんでした。");
       }}
     }}
-    function toggleModeSections() {{
-      const selector = document.querySelector('select[name="run_mode"]');
-      const mode = selector ? selector.value : "live";
-      document.querySelectorAll("[data-mode-section]").forEach((section) => {{
-        section.hidden = section.getAttribute("data-mode-section") !== mode;
-      }});
-    }}
     function setVideoPickerStatus(message) {{
       const status = document.getElementById("source-video-picker-status");
       if (status) {{
@@ -421,15 +408,10 @@ def render_studio_home(
       }}
     }}
     window.addEventListener("DOMContentLoaded", () => {{
-      const selector = document.querySelector('select[name="run_mode"]');
-      if (selector) {{
-        selector.addEventListener("change", toggleModeSections);
-      }}
       const form = document.getElementById("pipeline-run-form");
       if (form) {{
         form.addEventListener("submit", startPipelineRun);
       }}
-      toggleModeSections();
       renderProgressGraph(INITIAL_STAGE_STATUSES);
     }});
   </script>
@@ -437,13 +419,12 @@ def render_studio_home(
 <body>
 <main>
   <h1>FukiKae Studio ローカルWeb Alpha</h1>
-  <p><strong>内部betaモード</strong> - このマシン上のローカルパスだけを使います。</p>
+  <p><strong>ローカル実行モード</strong> - このマシン上のローカルパスだけを使います。</p>
   <section class="notice">
-    <p>このAlphaはデフォルトで<strong>ローカル限定</strong>・<strong>fixture実行</strong>です。localhostで動作し、既存CLIパイプラインを使います。</p>
+    <p>このAlphaは<strong>ローカル限定</strong>で動作し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。</p>
     <ul>
       <li><strong>外部アップロードなし</strong>: 選択した動画はlocalhostへローカル取り込みされ、このマシン内に残ります。</li>
       <li><strong>Live xAIモード</strong>: Live xAIモードでは、xAI STT・Grok・xAI TTSを使います。APIキーはこのローカル実行中だけ使用し、ページへ再表示しません。</li>
-      <li><strong>Fixtureモード</strong>: Fixtureモードでは、ローカルJSONとWAVを使います。APIキー不要で、ライブAPI呼び出しなしです。</li>
     </ul>
   </section>
   {error_html}
@@ -466,13 +447,8 @@ def render_studio_home(
   </section>
 
   <form id="pipeline-run-form" method="post" action="{escape(action)}">
+    <input type="hidden" name="run_mode" value="live">
     <div class="row-2">
-      <div>
-        <label>実行モード</label>
-        <select name="run_mode">
-          {_render_run_mode_options(_default(defaults, 'run_mode', 'live'))}
-        </select>
-      </div>
       <div>
         <label>字幕出力</label>
         <select name="subtitle_output">
@@ -496,24 +472,11 @@ def render_studio_home(
     </div>
     <p id="project-directory-picker-status" class="field-status" role="status" aria-live="polite"></p>
 
-    <section class="notice" data-mode-section="fixture">
-      <h2>Fixture入力</h2>
-      <p>Fixtureモードでは、ローカルJSONとWAVを資源として使います。Live xAIモードではこの欄は不要です。</p>
-      <label>STT fixtureレスポンス（ライブAPIなし）</label>
-      <input type="text" name="stt_fixture_response" value="{_default(defaults, 'stt_fixture_response')}">
-
-      <label>吹き替えfixtureレスポンス（ライブAPIなし）</label>
-      <input type="text" name="dubbing_fixture_response" value="{_default(defaults, 'dubbing_fixture_response')}">
-
-      <label>Fixture TTS音声（ローカルWAV）</label>
-      <input type="text" name="fixture_audio" value="{_default(defaults, 'fixture_audio')}">
-    </section>
-
-    <details class="settings-panel" data-mode-section="live">
+    <details class="settings-panel">
       <summary>設定</summary>
       <div class="settings-body">
         <h2>Live xAI設定</h2>
-        <p>Live xAIモードでは、ソース動画から音声を抽出し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。Fixtureファイルは使いません。</p>
+        <p>Live xAIモードでは、ソース動画から音声を抽出し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。</p>
         <label>xAI APIキー</label>
         <input type="password" name="xai_api_key" value="" autocomplete="off">
         <div class="row-2">
@@ -561,49 +524,32 @@ def render_studio_home(
 
 def run_studio_form(
     form: Mapping[str, object],
-    pipeline_runner: PipelineRunner = run_fixture_pipeline,
     live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
     client_factory: ClientFactory = XAIClient,
 ) -> dict:
     project_dir = Path(_required_form_value(form, "project"))
     execute_ffmpeg = _form_bool(form, "execute_ffmpeg")
-    run_mode = _form_value(form, "run_mode", "fixture")
     subtitle_output = _form_value(form, "subtitle_output", DEFAULT_SUBTITLE_OUTPUT)
-    if run_mode == "live":
-        config = XAIConfig(
-            api_key=_required_form_value(form, "xai_api_key"),
-            base_url=_form_value(form, "xai_base_url", DEFAULT_XAI_BASE_URL),
-            text_model=_form_value(form, "xai_text_model", DEFAULT_XAI_TEXT_MODEL),
-            stt_language=_form_value(form, "source_lang", "auto"),
-            tts_voice=_form_value(form, "voice", DEFAULT_XAI_TTS_VOICE),
-            tts_language=_form_value(form, "target_lang", "ja"),
-        )
-        result = live_pipeline_runner(
-            project_dir,
-            source_video=Path(_required_form_value(form, "video")),
-            client=client_factory(config),
-            text_model=config.text_model,
-            source_lang=config.stt_language,
-            target_lang=config.tts_language,
-            voice=config.tts_voice,
-            overwrite=_form_bool(form, "overwrite"),
-            execute_ffmpeg=execute_ffmpeg,
-            subtitle_output=subtitle_output,
-        )
-    else:
-        result = pipeline_runner(
-            project_dir,
-            source_video=Path(_required_form_value(form, "video")),
-            stt_fixture_response=Path(_required_form_value(form, "stt_fixture_response")),
-            dubbing_fixture_response=Path(_required_form_value(form, "dubbing_fixture_response")),
-            fixture_audio=Path(_required_form_value(form, "fixture_audio")),
-            source_lang=_form_value(form, "source_lang", "auto"),
-            target_lang=_form_value(form, "target_lang", "ja"),
-            voice=_form_value(form, "voice", DEFAULT_XAI_TTS_VOICE),
-            overwrite=_form_bool(form, "overwrite"),
-            execute_ffmpeg=execute_ffmpeg,
-            subtitle_output=subtitle_output,
-        )
+    config = XAIConfig(
+        api_key=_required_form_value(form, "xai_api_key"),
+        base_url=_form_value(form, "xai_base_url", DEFAULT_XAI_BASE_URL),
+        text_model=_form_value(form, "xai_text_model", DEFAULT_XAI_TEXT_MODEL),
+        stt_language=_form_value(form, "source_lang", "auto"),
+        tts_voice=_form_value(form, "voice", DEFAULT_XAI_TTS_VOICE),
+        tts_language=_form_value(form, "target_lang", "ja"),
+    )
+    result = live_pipeline_runner(
+        project_dir,
+        source_video=Path(_required_form_value(form, "video")),
+        client=client_factory(config),
+        text_model=config.text_model,
+        source_lang=config.stt_language,
+        target_lang=config.tts_language,
+        voice=config.tts_voice,
+        overwrite=_form_bool(form, "overwrite"),
+        execute_ffmpeg=execute_ffmpeg,
+        subtitle_output=subtitle_output,
+    )
     summary = _build_run_summary(project_dir, result, execute_ffmpeg=execute_ffmpeg)
     if _form_bool(form, "clean_output"):
         summary = _keep_only_final_mp4(project_dir, summary, overwrite=_form_bool(form, "overwrite"))
@@ -613,11 +559,9 @@ def run_studio_form(
 class RunJobStore:
     def __init__(
         self,
-        pipeline_runner: PipelineRunner = run_fixture_pipeline,
         live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
         client_factory: ClientFactory = XAIClient,
     ) -> None:
-        self._pipeline_runner = pipeline_runner
         self._live_pipeline_runner = live_pipeline_runner
         self._client_factory = client_factory
         self._jobs: dict[str, dict[str, Any]] = {}
@@ -657,7 +601,6 @@ class RunJobStore:
         try:
             result = run_studio_form(
                 form,
-                pipeline_runner=self._pipeline_runner,
                 live_pipeline_runner=self._live_pipeline_runner,
                 client_factory=self._client_factory,
             )
@@ -736,7 +679,6 @@ def _unique_upload_path(upload_dir: Path, filename: str) -> Path:
 def make_studio_handler(
     defaults: Mapping[str, object],
     access_key: str,
-    pipeline_runner: PipelineRunner = run_fixture_pipeline,
     live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
     client_factory: ClientFactory = XAIClient,
     upload_dir: Optional[Path] = None,
@@ -745,7 +687,6 @@ def make_studio_handler(
 ):
     source_upload_dir = Path(upload_dir) if upload_dir is not None else Path.cwd() / DEFAULT_UPLOAD_DIR
     jobs = job_store or RunJobStore(
-        pipeline_runner=pipeline_runner,
         live_pipeline_runner=live_pipeline_runner,
         client_factory=client_factory,
     )
@@ -813,7 +754,6 @@ def make_studio_handler(
             try:
                 result = run_studio_form(
                     form,
-                    pipeline_runner=pipeline_runner,
                     live_pipeline_runner=live_pipeline_runner,
                     client_factory=client_factory,
                 )
@@ -1131,13 +1071,9 @@ def _render_empty_result() -> str:
 def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping[str, object]) -> dict:
     merged = dict(defaults)
     for key in (
-        "run_mode",
         "subtitle_output",
         "video",
         "project",
-        "stt_fixture_response",
-        "dubbing_fixture_response",
-        "fixture_audio",
         "source_lang",
         "target_lang",
         "voice",
@@ -1180,18 +1116,6 @@ def _render_voice_options(selected_voice: str) -> str:
             f"{escape(selected_voice)} カスタム</option>"
         )
     return "\n          ".join(options)
-
-
-def _render_run_mode_options(selected_mode: str) -> str:
-    labels = {
-        "fixture": "Fixture betaモード",
-        "live": "Live xAIモード",
-    }
-    return "\n          ".join(
-        f'<option value="{escape(mode, quote=True)}"{" selected" if mode == selected_mode else ""}>'
-        f"{escape(label)}</option>"
-        for mode, label in labels.items()
-    )
 
 
 def _render_subtitle_output_options(selected_mode: str) -> str:

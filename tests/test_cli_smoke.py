@@ -24,6 +24,7 @@ def test_python_module_help_displays_cli_usage():
     assert "init" in result.stdout
     assert "run" in result.stdout
     assert "run-live" in result.stdout
+    assert "fixture" not in result.stdout.lower()
 
 
 def test_run_live_help_displays_env_file_option():

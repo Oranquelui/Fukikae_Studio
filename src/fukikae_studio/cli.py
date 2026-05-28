@@ -29,8 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fukikae",
         description=(
-            "FukiKae Studio xAI-only local video dubbing CLI MVP. "
-            "Implemented stages expose deterministic local command plans or fixture-backed artifacts."
+            "FukiKae Studio xAI-only local video dubbing CLI. "
+            "Local commands prepare projects, inspect media, run live dubbing, and validate artifacts."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", metavar="command")
@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--overwrite", action="store_true", help="allow ffmpeg to overwrite the output WAV")
     extract_parser.set_defaults(func=_extract_audio)
 
-    stt_parser = subparsers.add_parser("stt", help="normalize an xAI STT fixture response for a project")
+    stt_parser = subparsers.add_parser("stt", help="normalize a saved xAI STT response for a project")
     stt_parser.add_argument("project", type=Path, help="local FukiKae project directory")
     stt_parser.add_argument(
         "--fixture-response",
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     stt_parser.add_argument("--target-lang", default="ja", help="target language, default: ja")
     stt_parser.set_defaults(func=_stt)
 
-    script_parser = subparsers.add_parser("make-script", help="parse a Grok dubbing fixture response for a project")
+    script_parser = subparsers.add_parser("make-script", help="parse a saved Grok dubbing response for a project")
     script_parser.add_argument("project", type=Path, help="local FukiKae project directory")
     script_parser.add_argument(
         "--fixture-response",
@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     script_parser.add_argument("--model", default="grok-4.3", help="Grok model name for request artifact metadata")
     script_parser.set_defaults(func=_make_script)
 
-    tts_parser = subparsers.add_parser("tts", help="write TTS fixture audio files and manifest for a project")
+    tts_parser = subparsers.add_parser("tts", help="write local TTS audio files and manifest for a project")
     tts_parser.add_argument("project", type=Path, help="local FukiKae project directory")
     tts_parser.add_argument(
         "--fixture-audio",
@@ -102,12 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
     assemble_parser.add_argument("--overwrite", action="store_true", help="allow assembly artifacts to be overwritten")
     assemble_parser.set_defaults(func=_assemble)
 
-    validate_parser = subparsers.add_parser("validate", help="validate local artifacts for fixture-backed testing")
+    validate_parser = subparsers.add_parser("validate", help="validate local artifacts")
     validate_parser.add_argument("project", type=Path, help="local FukiKae project directory")
     validate_parser.add_argument("--overwrite", action="store_true", help="allow validation report to be overwritten")
     validate_parser.set_defaults(func=_validate)
 
-    run_parser = subparsers.add_parser("run", help="run the fixture-backed local pipeline for a project")
+    run_parser = subparsers.add_parser("run", help="run the local development pipeline for a project")
     run_parser.add_argument("--video", type=Path, required=True, help="local source video")
     run_parser.add_argument("--project", type=Path, required=True, help="local FukiKae project directory")
     run_parser.add_argument(
@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--execute-ffmpeg",
         action="store_true",
-        help="execute local ffmpeg rendering after fixture artifacts are written",
+        help="execute local ffmpeg rendering after development artifacts are written",
     )
     run_parser.add_argument(
         "--subtitle-output",
@@ -192,17 +192,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     studio_parser.add_argument("--video", type=Path, help="default local source video path shown in the form")
     studio_parser.add_argument("--project", type=Path, help="default local project directory shown in the form")
-    studio_parser.add_argument(
-        "--fixture-stt-response",
-        type=Path,
-        help="default sanitized STT fixture path shown in the fixture-backed form",
-    )
-    studio_parser.add_argument(
-        "--fixture-dubbing-response",
-        type=Path,
-        help="default sanitized dubbing fixture path shown in the fixture-backed form",
-    )
-    studio_parser.add_argument("--fixture-audio", type=Path, help="default fixture TTS audio path shown in the form")
     studio_parser.add_argument("--open-browser", action="store_true", help="open the local Web UI in the default browser")
     studio_parser.set_defaults(func=_studio)
 
@@ -342,12 +331,6 @@ def _studio(args: argparse.Namespace) -> int:
         defaults["video"] = str(args.video)
     if args.project is not None:
         defaults["project"] = str(args.project)
-    if args.fixture_stt_response is not None:
-        defaults["stt_fixture_response"] = str(args.fixture_stt_response)
-    if args.fixture_dubbing_response is not None:
-        defaults["dubbing_fixture_response"] = str(args.fixture_dubbing_response)
-    if args.fixture_audio is not None:
-        defaults["fixture_audio"] = str(args.fixture_audio)
     try:
         run_studio_server(
             host=args.host,
