@@ -42,7 +42,7 @@ STUDIO_STAGES = (
 def default_studio_form_values(repo_root: Optional[Path] = None) -> dict:
     root = Path(repo_root) if repo_root is not None else Path.cwd()
     return {
-        "video": str(root / "work" / "local-smoke" / "source.mp4"),
+        "video": "",
         "project": str(root / "work" / "local-smoke" / "project"),
         "stt_fixture_response": str(root / "tests" / "fixtures" / "sample_stt_response.json"),
         "dubbing_fixture_response": str(root / "tests" / "fixtures" / "sample_dubbing_response.json"),
@@ -252,7 +252,7 @@ def render_studio_home(
 
     <label for="source-video-path">ソース動画パス（ローカルファイル）</label>
     <div class="path-picker">
-      <input id="source-video-path" type="text" name="video" value="{_default(defaults, 'video')}">
+      <input id="source-video-path" type="text" name="video" required value="{_default(defaults, 'video')}">
       <button type="button" data-file-open-target="video" onclick="openSourceVideoPicker()">File open</button>
     </div>
     <input id="source-video-file" class="visually-hidden" type="file" accept="video/*,.mp4,.mov,.m4v,.mkv,.webm" onchange="uploadSourceVideo(this)">
@@ -470,15 +470,16 @@ def make_studio_handler(
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             form = {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
+            render_defaults = _merge_submitted_form_defaults(defaults, form)
             try:
                 result = run_studio_form(form, pipeline_runner=pipeline_runner)
                 self._send_text(
-                    render_studio_home(defaults, access_key, last_result=result),
+                    render_studio_home(render_defaults, access_key, last_result=result),
                     content_type="text/html; charset=utf-8",
                 )
             except Exception as exc:  # pragma: no cover - defensive server boundary
                 self._send_text(
-                    render_studio_home(defaults, access_key, error=str(exc)),
+                    render_studio_home(render_defaults, access_key, error=str(exc)),
                     status=400,
                     content_type="text/html; charset=utf-8",
                 )
@@ -616,6 +617,8 @@ def _render_error(error: str) -> str:
 def _friendly_error_message(error: str) -> str:
     raw_error = str(error)
     normalized = raw_error.lower()
+    if "source video was not found" in normalized:
+        return "ソース動画が見つかりません。File openで動画を選択してください。"
     if "incorrect api key" in normalized:
         return "xAI API Keyが正しくありません。設定を開いてAPI Keyを確認してください。"
     if "xai_api_key is required" in normalized:
@@ -627,6 +630,27 @@ def _friendly_error_message(error: str) -> str:
 
 def _render_empty_result() -> str:
     return ""
+
+
+def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping[str, object]) -> dict:
+    merged = dict(defaults)
+    for key in (
+        "run_mode",
+        "subtitle_output",
+        "video",
+        "project",
+        "stt_fixture_response",
+        "dubbing_fixture_response",
+        "fixture_audio",
+        "source_lang",
+        "target_lang",
+        "voice",
+        "xai_base_url",
+        "xai_text_model",
+    ):
+        if key in form:
+            merged[key] = str(form[key])
+    return merged
 
 
 def _default(defaults: Mapping[str, object], key: str, fallback: str = "") -> str:

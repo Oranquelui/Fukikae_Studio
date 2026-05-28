@@ -3,12 +3,15 @@ import os
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import HTTPServer
 from pathlib import Path
 
 from fukikae_studio.web.studio import (
     build_studio_url,
+    default_studio_form_values,
     make_studio_handler,
     render_studio_home,
     run_studio_form,
@@ -79,6 +82,15 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert "まだローカル実行を開始していません" not in html
 
 
+def test_default_studio_form_values_do_not_prefill_missing_source_video(tmp_path):
+    defaults = default_studio_form_values(tmp_path)
+
+    assert defaults["video"] == ""
+    html = render_studio_home(defaults, access_key="abc123")
+    assert str(tmp_path / "work" / "local-smoke" / "source.mp4") not in html
+    assert 'id="source-video-path" type="text" name="video" required' in html
+
+
 def test_render_studio_home_never_echoes_xai_api_key_defaults():
     html = render_studio_home({"xai_api_key": "unit-test-secret"}, access_key="abc123")
 
@@ -100,6 +112,19 @@ def test_render_studio_home_sanitizes_invalid_xai_api_key_errors():
     assert "設定を開いてAPI Keyを確認してください" in html
     assert "Incorrect API key" not in html
     assert "xa****mc" not in html
+    assert "<pre>" not in html
+
+
+def test_render_studio_home_sanitizes_missing_source_video_errors():
+    html = render_studio_home(
+        {},
+        access_key="abc123",
+        error="Source video was not found: /tmp/missing-source.mp4",
+    )
+
+    assert "ソース動画が見つかりません" in html
+    assert "File openで動画を選択してください" in html
+    assert "Source video was not found" not in html
     assert "<pre>" not in html
 
 
@@ -180,6 +205,59 @@ def test_choose_project_directory_endpoint_returns_selected_path(tmp_path):
             payload = json.loads(response.read().decode("utf-8"))
         assert payload == {"path": str(selected_dir)}
         assert calls == [str(current_dir)]
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+
+def test_run_endpoint_preserves_submitted_paths_after_error(tmp_path):
+    submitted_video = tmp_path / "selected.mp4"
+    submitted_project = tmp_path / "project"
+
+    def failing_pipeline(*args, **kwargs):
+        raise FileNotFoundError(f"Source video was not found: {submitted_video}")
+
+    handler = make_studio_handler(
+        {"video": "", "project": "work/local-smoke/project"},
+        access_key="abc123",
+        pipeline_runner=failing_pipeline,
+    )
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        body = urllib.parse.urlencode(
+            {
+                "run_mode": "fixture",
+                "video": str(submitted_video),
+                "project": str(submitted_project),
+                "stt_fixture_response": str(tmp_path / "stt.json"),
+                "dubbing_fixture_response": str(tmp_path / "dubbing.json"),
+                "fixture_audio": str(tmp_path / "fixture.wav"),
+                "source_lang": "auto",
+                "target_lang": "ja",
+                "voice": "d0cb9ff07d95",
+                "subtitle_output": "both",
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/run?key=abc123",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            urllib.request.urlopen(request)
+        except urllib.error.HTTPError as exc:
+            html = exc.read().decode("utf-8")
+        else:  # pragma: no cover - defensive test branch
+            raise AssertionError("Expected the failing pipeline to return HTTP 400")
+
+        assert "ソース動画が見つかりません" in html
+        assert str(submitted_video) in html
+        assert str(submitted_project) in html
+        assert "work/local-smoke/source.mp4" not in html
     finally:
         server.shutdown()
         thread.join(timeout=3)
