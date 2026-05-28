@@ -5,6 +5,8 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import webbrowser
 from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -37,6 +39,16 @@ STUDIO_STAGES = (
     "final-mux",
     "validate",
 )
+STUDIO_STAGE_LABELS = {
+    "init": "準備",
+    "stt": "音声認識",
+    "make-script": "翻訳",
+    "tts": "音声生成",
+    "assemble": "組み立て",
+    "final-mux": "最終レンダー",
+    "validate": "検証",
+}
+STUDIO_STAGE_ESTIMATE_SECONDS = 4.0
 
 
 def default_studio_form_values(repo_root: Optional[Path] = None) -> dict:
@@ -84,6 +96,8 @@ def render_studio_home(
     action = f"/run?key={quote(access_key)}"
     source_video_upload_url = json.dumps(f"/upload-source-video?key={quote(access_key)}")
     project_directory_choose_url = json.dumps(f"/choose-project-directory?key={quote(access_key)}")
+    stage_labels_json = json.dumps(STUDIO_STAGE_LABELS, ensure_ascii=False)
+    initial_stage_statuses_json = json.dumps(_initial_progress_stage_statuses(), ensure_ascii=False)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -110,11 +124,189 @@ def render_studio_home(
     .settings-panel[open] > summary::after {{ content: "-"; }}
     .settings-body {{ border-top: 1px solid #d8dee4; padding: 1rem; }}
     .settings-body h2 {{ margin-top: 0; }}
+    .progress-panel {{ background: #f8fbff; border: 1px solid #b9ddff; border-radius: 12px; padding: 1rem; margin: 1rem 0; }}
+    .progress-panel h2 {{ margin-top: 0; }}
+    .progress-graph {{ display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.5rem; margin-top: 1rem; }}
+    .progress-step {{ border: 1px solid #d8dee4; border-radius: 8px; background: #ffffff; padding: 0.7rem 0.5rem; min-height: 4.25rem; display: grid; gap: 0.35rem; align-content: center; text-align: center; }}
+    .progress-dot {{ width: 0.75rem; height: 0.75rem; border-radius: 999px; background: #cbd5e1; margin: 0 auto; }}
+    .progress-label {{ font-weight: 700; font-size: 0.88rem; }}
+    .progress-status {{ color: #475569; font-size: 0.82rem; }}
+    .progress-step[data-status="running"] {{ border-color: #00c853; box-shadow: 0 0 0 2px rgba(0, 200, 83, 0.14); }}
+    .progress-step[data-status="running"] .progress-dot {{ background: #00c853; }}
+    .progress-step[data-status="complete"] {{ border-color: #8ee4af; background: #f1fff7; }}
+    .progress-step[data-status="complete"] .progress-dot {{ background: #00a66a; }}
+    .progress-step[data-status="failed"] {{ border-color: #ffccc7; background: #fff7f6; }}
+    .progress-step[data-status="failed"] .progress-dot {{ background: #d93025; }}
     button {{ margin-top: 1rem; padding: 0.7rem 1.1rem; font-weight: 700; }}
     code, pre {{ background: #f6f8fa; padding: 0.15rem 0.3rem; border-radius: 4px; }}
+    @media (max-width: 720px) {{
+      .row, .row-2 {{ grid-template-columns: 1fr; }}
+      .progress-graph {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    }}
     [hidden] {{ display: none !important; }}
   </style>
   <script>
+    const STUDIO_STAGE_LABELS = {stage_labels_json};
+    const INITIAL_STAGE_STATUSES = {initial_stage_statuses_json};
+    const STATUS_LABELS = {{
+      queued: "待機中",
+      running: "実行中",
+      complete: "完了",
+      ready: "準備完了",
+      failed: "失敗",
+      pending: "待機中"
+    }};
+    let runStatusTimer = null;
+
+    function statusLabel(status) {{
+      return STATUS_LABELS[status] || status || "unknown";
+    }}
+    function renderProgressGraph(stages) {{
+      const graph = document.getElementById("pipeline-progress-graph");
+      if (!graph) {{
+        return;
+      }}
+      graph.replaceChildren();
+      (stages || INITIAL_STAGE_STATUSES).forEach((stage) => {{
+        const item = document.createElement("div");
+        const status = stage.status || "pending";
+        item.className = "progress-step";
+        item.dataset.status = status;
+
+        const dot = document.createElement("span");
+        dot.className = "progress-dot";
+        dot.setAttribute("aria-hidden", "true");
+
+        const label = document.createElement("span");
+        label.className = "progress-label";
+        label.textContent = stage.label || STUDIO_STAGE_LABELS[stage.stage] || stage.stage || "stage";
+
+        const state = document.createElement("span");
+        state.className = "progress-status";
+        state.textContent = statusLabel(status);
+
+        item.append(dot, label, state);
+        graph.append(item);
+      }});
+    }}
+    function setRunButtonBusy(isBusy) {{
+      const button = document.querySelector('#pipeline-run-form button[type="submit"]');
+      if (!button) {{
+        return;
+      }}
+      button.disabled = isBusy;
+      button.textContent = isBusy ? "実行中..." : "ローカルパイプラインを実行";
+    }}
+    function showProgressPanel(payload) {{
+      const panel = document.getElementById("pipeline-progress-panel");
+      const message = document.getElementById("pipeline-progress-message");
+      if (!panel) {{
+        return;
+      }}
+      panel.hidden = false;
+      if (message) {{
+        message.textContent = payload.message || "ローカルパイプラインを実行しています。";
+      }}
+      renderProgressGraph(payload.stage_statuses || INITIAL_STAGE_STATUSES);
+    }}
+    function hideAsyncPanels() {{
+      const asyncError = document.getElementById("async-error-panel");
+      const asyncResult = document.getElementById("async-result-panel");
+      if (asyncError) {{
+        asyncError.hidden = true;
+      }}
+      if (asyncResult) {{
+        asyncResult.hidden = true;
+      }}
+    }}
+    function showAsyncError(message) {{
+      const panel = document.getElementById("async-error-panel");
+      const text = document.getElementById("async-error-message");
+      if (!panel || !text) {{
+        return;
+      }}
+      text.textContent = message || "実行に失敗しました。";
+      panel.hidden = false;
+      setRunButtonBusy(false);
+    }}
+    function showAsyncResult(result) {{
+      const panel = document.getElementById("async-result-panel");
+      if (!panel || !result) {{
+        return;
+      }}
+      const status = document.getElementById("async-result-status");
+      const output = document.getElementById("async-result-output");
+      const report = document.getElementById("async-result-report");
+      if (status) {{
+        status.textContent = result.status || "unknown";
+      }}
+      if (output) {{
+        output.textContent = result.output_mp4 || "";
+      }}
+      if (report) {{
+        report.textContent = result.validation_report || "";
+      }}
+      panel.hidden = false;
+      setRunButtonBusy(false);
+    }}
+    async function pollRunStatus(statusUrl) {{
+      try {{
+        const response = await fetch(statusUrl, {{ headers: {{ "Accept": "application/json" }} }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "進捗を取得できませんでした。");
+        }}
+        showProgressPanel(payload);
+        if (payload.status === "complete") {{
+          clearTimeout(runStatusTimer);
+          showAsyncResult(payload.result);
+          return;
+        }}
+        if (payload.status === "failed") {{
+          clearTimeout(runStatusTimer);
+          showAsyncError(payload.error || "実行に失敗しました。");
+          return;
+        }}
+        runStatusTimer = setTimeout(() => pollRunStatus(statusUrl), payload.poll_ms || 1000);
+      }} catch (error) {{
+        clearTimeout(runStatusTimer);
+        showAsyncError(error.message || "進捗を取得できませんでした。");
+      }}
+    }}
+    async function startPipelineRun(event) {{
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!form.reportValidity()) {{
+        return;
+      }}
+      clearTimeout(runStatusTimer);
+      hideAsyncPanels();
+      setRunButtonBusy(true);
+      showProgressPanel({{
+        message: "ローカルパイプラインを開始しています。",
+        stage_statuses: INITIAL_STAGE_STATUSES
+      }});
+      const progressPanel = document.getElementById("pipeline-progress-panel");
+      if (progressPanel) {{
+        progressPanel.scrollIntoView({{ behavior: "smooth", block: "start" }});
+      }}
+      try {{
+        const response = await fetch(form.action, {{
+          method: "POST",
+          headers: {{ "Accept": "application/json" }},
+          body: new URLSearchParams(new FormData(form))
+        }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "ローカルパイプラインを開始できませんでした。");
+        }}
+        showProgressPanel(payload);
+        pollRunStatus(new URL(payload.status_url, window.location.href).toString());
+      }} catch (error) {{
+        clearTimeout(runStatusTimer);
+        showAsyncError(error.message || "ローカルパイプラインを開始できませんでした。");
+      }}
+    }}
     function toggleModeSections() {{
       const selector = document.querySelector('select[name="run_mode"]');
       const mode = selector ? selector.value : "live";
@@ -217,7 +409,12 @@ def render_studio_home(
       if (selector) {{
         selector.addEventListener("change", toggleModeSections);
       }}
+      const form = document.getElementById("pipeline-run-form");
+      if (form) {{
+        form.addEventListener("submit", startPipelineRun);
+      }}
       toggleModeSections();
+      renderProgressGraph(INITIAL_STAGE_STATUSES);
     }});
   </script>
 </head>
@@ -234,7 +431,25 @@ def render_studio_home(
     </ul>
   </section>
   {error_html}
-  <form method="post" action="{escape(action)}">
+  <section id="async-error-panel" class="error" hidden>
+    <h2>エラー</h2>
+    <p id="async-error-message"></p>
+  </section>
+
+  <section id="pipeline-progress-panel" class="progress-panel" hidden>
+    <h2>実行中</h2>
+    <p id="pipeline-progress-message">待機中</p>
+    <div id="pipeline-progress-graph" class="progress-graph" aria-label="実行ステージ"></div>
+  </section>
+
+  <section id="async-result-panel" class="result" hidden>
+    <h2>実行結果</h2>
+    <p>ステータス: <strong id="async-result-status"></strong></p>
+    <p>出力MP4: <code id="async-result-output"></code></p>
+    <p>検証レポート: <code id="async-result-report"></code></p>
+  </section>
+
+  <form id="pipeline-run-form" method="post" action="{escape(action)}">
     <div class="row-2">
       <div>
         <label>実行モード</label>
@@ -375,6 +590,82 @@ def run_studio_form(
     return _build_run_summary(project_dir, result, execute_ffmpeg=execute_ffmpeg)
 
 
+class RunJobStore:
+    def __init__(
+        self,
+        pipeline_runner: PipelineRunner = run_fixture_pipeline,
+        live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
+        client_factory: ClientFactory = XAIClient,
+    ) -> None:
+        self._pipeline_runner = pipeline_runner
+        self._live_pipeline_runner = live_pipeline_runner
+        self._client_factory = client_factory
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    def start(self, form: Mapping[str, object]) -> dict:
+        job_id = secrets.token_urlsafe(12)
+        now = time.monotonic()
+        job = {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "ローカルパイプラインを開始しています。",
+            "started_at": now,
+            "updated_at": now,
+            "result": None,
+            "error": None,
+            "failed_stage": None,
+        }
+        with self._lock:
+            self._jobs[job_id] = job
+        thread = threading.Thread(target=self._run_job, args=(job_id, dict(form)), daemon=True)
+        thread.start()
+        snapshot = self.snapshot(job_id)
+        if snapshot is None:  # pragma: no cover - defensive boundary
+            raise RuntimeError("ジョブを開始できませんでした。")
+        return snapshot
+
+    def snapshot(self, job_id: str) -> Optional[dict]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return _public_job_snapshot(dict(job))
+
+    def _run_job(self, job_id: str, form: Mapping[str, object]) -> None:
+        self._update(job_id, status="running", message="ローカルパイプラインを実行しています。")
+        try:
+            result = run_studio_form(
+                form,
+                pipeline_runner=self._pipeline_runner,
+                live_pipeline_runner=self._live_pipeline_runner,
+                client_factory=self._client_factory,
+            )
+        except Exception as exc:  # pragma: no cover - exercised through server boundary tests
+            self._update(
+                job_id,
+                status="failed",
+                error=_friendly_error_message(str(exc)),
+                failed_stage=_estimated_active_stage_index(self._started_at(job_id)),
+                message="ローカルパイプラインが停止しました。",
+            )
+            return
+        self._update(job_id, status="complete", result=result, message="ローカルパイプラインが完了しました。")
+
+    def _started_at(self, job_id: str) -> float:
+        with self._lock:
+            job = self._jobs.get(job_id, {})
+            return float(job.get("started_at", time.monotonic()))
+
+    def _update(self, job_id: str, **changes: object) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            job.update(changes)
+            job["updated_at"] = time.monotonic()
+
+
 def save_uploaded_source_video(file_obj: IO[bytes], original_filename: str, upload_dir: Path) -> Path:
     upload_dir.mkdir(parents=True, exist_ok=True)
     filename = _safe_upload_filename(original_filename)
@@ -426,16 +717,35 @@ def make_studio_handler(
     defaults: Mapping[str, object],
     access_key: str,
     pipeline_runner: PipelineRunner = run_fixture_pipeline,
+    live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
+    client_factory: ClientFactory = XAIClient,
     upload_dir: Optional[Path] = None,
     directory_picker: DirectoryPicker = choose_project_directory,
+    job_store: Optional[RunJobStore] = None,
 ):
     source_upload_dir = Path(upload_dir) if upload_dir is not None else Path.cwd() / DEFAULT_UPLOAD_DIR
+    jobs = job_store or RunJobStore(
+        pipeline_runner=pipeline_runner,
+        live_pipeline_runner=live_pipeline_runner,
+        client_factory=client_factory,
+    )
 
     class StudioHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/health":
                 self._send_json({"status": "ok", "mode": "local_web_alpha"})
+                return
+            if parsed.path == "/run-status":
+                if not self._is_authorized(parsed.query):
+                    self._send_json({"error": "Forbidden"}, status=403)
+                    return
+                job_id = parse_qs(parsed.query).get("job_id", [""])[-1]
+                snapshot = jobs.snapshot(job_id)
+                if snapshot is None:
+                    self._send_json({"error": "実行ジョブが見つかりません。"}, status=404)
+                    return
+                self._send_json(snapshot)
                 return
             if parsed.path != "/" or not self._is_authorized(parsed.query):
                 self._send_text("Forbidden\n", status=403, content_type="text/plain; charset=utf-8")
@@ -471,8 +781,22 @@ def make_studio_handler(
             body = self.rfile.read(length).decode("utf-8")
             form = {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
             render_defaults = _merge_submitted_form_defaults(defaults, form)
+            if self._accepts_json():
+                try:
+                    snapshot = jobs.start(form)
+                    payload = dict(snapshot)
+                    payload["status_url"] = f"/run-status?key={quote(access_key)}&job_id={quote(str(snapshot['job_id']))}"
+                    self._send_json(payload, status=202)
+                except Exception as exc:  # pragma: no cover - defensive server boundary
+                    self._send_json({"error": _friendly_error_message(str(exc))}, status=400)
+                return
             try:
-                result = run_studio_form(form, pipeline_runner=pipeline_runner)
+                result = run_studio_form(
+                    form,
+                    pipeline_runner=pipeline_runner,
+                    live_pipeline_runner=live_pipeline_runner,
+                    client_factory=client_factory,
+                )
                 self._send_text(
                     render_studio_home(render_defaults, access_key, last_result=result),
                     content_type="text/html; charset=utf-8",
@@ -489,6 +813,9 @@ def make_studio_handler(
 
         def _is_authorized(self, query: str) -> bool:
             return parse_qs(query).get("key", [""])[-1] == access_key
+
+        def _accepts_json(self) -> bool:
+            return "application/json" in self.headers.get("Accept", "").lower()
 
         def _save_uploaded_source_video(self, upload_dir: Path) -> Path:
             length = int(self.headers.get("Content-Length", "0"))
@@ -527,11 +854,14 @@ def make_studio_handler(
 
         def _send_text(self, text: str, status: int = 200, content_type: str = "text/plain") -> None:
             encoded = text.encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+            except BrokenPipeError:
+                return
 
     return StudioHandler
 
@@ -588,6 +918,82 @@ def _stage_statuses(status: str, execute_ffmpeg: bool, final_output_exists: bool
         {"stage": stage, "status": final_mux_status if stage == "final-mux" else "complete"}
         for stage in STUDIO_STAGES
     ]
+
+
+def _public_job_snapshot(job: Mapping[str, Any]) -> dict:
+    status = str(job.get("status", "queued"))
+    result = job.get("result")
+    payload = {
+        "job_id": str(job.get("job_id", "")),
+        "status": status,
+        "message": str(job.get("message", "")),
+        "poll_ms": 1000,
+        "stage_statuses": _job_stage_statuses(job),
+    }
+    if status == "complete" and isinstance(result, Mapping):
+        payload["result"] = dict(result)
+    if status == "failed":
+        payload["error"] = str(job.get("error") or "実行に失敗しました。")
+    return payload
+
+
+def _job_stage_statuses(job: Mapping[str, Any]) -> list:
+    status = str(job.get("status", "queued"))
+    result = job.get("result")
+    if status == "complete" and isinstance(result, Mapping):
+        stages = result.get("stage_statuses")
+        if isinstance(stages, Sequence):
+            return [_label_stage_status(stage) for stage in stages if isinstance(stage, Mapping)]
+    return _estimated_progress_stage_statuses(
+        started_at=float(job.get("started_at", time.monotonic())),
+        job_status=status,
+        failed_stage=job.get("failed_stage"),
+    )
+
+
+def _initial_progress_stage_statuses() -> list:
+    return [
+        {
+            "stage": stage,
+            "label": STUDIO_STAGE_LABELS.get(stage, stage),
+            "status": "running" if index == 0 else "pending",
+        }
+        for index, stage in enumerate(STUDIO_STAGES)
+    ]
+
+
+def _estimated_progress_stage_statuses(started_at: float, job_status: str, failed_stage: object = None) -> list:
+    if job_status == "queued":
+        active_index = 0
+    else:
+        active_index = _estimated_active_stage_index(started_at)
+    failed_index = int(failed_stage) if isinstance(failed_stage, int) else active_index
+    statuses = []
+    for index, stage in enumerate(STUDIO_STAGES):
+        if job_status == "failed" and index == failed_index:
+            status = "failed"
+        elif index < active_index or (job_status == "failed" and index < failed_index):
+            status = "complete"
+        elif index == active_index and job_status in {"queued", "running"}:
+            status = "running"
+        else:
+            status = "pending"
+        statuses.append({"stage": stage, "label": STUDIO_STAGE_LABELS.get(stage, stage), "status": status})
+    return statuses
+
+
+def _estimated_active_stage_index(started_at: float) -> int:
+    elapsed = max(0.0, time.monotonic() - started_at)
+    return min(int(elapsed / STUDIO_STAGE_ESTIMATE_SECONDS), len(STUDIO_STAGES) - 1)
+
+
+def _label_stage_status(stage: Mapping[str, object]) -> dict:
+    stage_name = str(stage.get("stage", "unknown"))
+    return {
+        "stage": stage_name,
+        "label": STUDIO_STAGE_LABELS.get(stage_name, stage_name),
+        "status": str(stage.get("status", "unknown")),
+    }
 
 
 def _render_result(result: Mapping[str, object]) -> str:
