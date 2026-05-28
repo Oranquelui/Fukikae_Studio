@@ -25,6 +25,16 @@ FukiKae Studioは次の目的で作っています。
 - 焼き込み字幕、ソフト字幕、両方の出力を選べます。
 - 最終出力、検証レポート、中間artifactをローカルプロジェクトディレクトリに残します。
 
+## 画面イメージ
+
+メイン画面では、動画ファイル、出力先、Voice、字幕出力を選びます。API Key欄は初期表示では閉じています。
+
+![FukiKae Studio main screen](docs/assets/readme-main.jpg)
+
+`設定`を開くと、Live xAI用のAPI Keyとモデル設定を入力できます。API Keyは実行中だけ使い、画面へ再表示しません。
+
+![FukiKae Studio settings panel](docs/assets/readme-settings.jpg)
+
 ## 料金の考え方
 
 FukiKae Studio自体は無料です。サーバー利用料、月額利用料、FukiKae側の手数料はありません。

@@ -28,6 +28,7 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     html = render_studio_home(defaults, access_key="abc123")
 
     assert "FukiKae Studio ローカルWeb Alpha" in html
+    assert "background: #ffffff" in html
     assert "内部betaモード" in html
     assert "ローカル限定" in html
     assert "Live xAIモードでは、xAI STT・Grok・xAI TTSを使います" in html
@@ -69,8 +70,6 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert "このローカル実行中だけ使用" in html
     assert 'name="execute_ffmpeg"' in html
     assert "work/local-smoke/source.mp4" in html
-    assert "validation/local_test_report.json" in html
-    assert "output/dubbed.ja.mp4" in html
 
 
 def test_render_studio_home_never_echoes_xai_api_key_defaults():
@@ -78,6 +77,25 @@ def test_render_studio_home_never_echoes_xai_api_key_defaults():
 
     assert "unit-test-secret" not in html
     assert 'type="password" name="xai_api_key" value=""' in html
+
+
+def test_render_studio_home_shows_concise_result_without_raw_json():
+    html = render_studio_home(
+        {},
+        access_key="abc123",
+        last_result={
+            "status": "complete",
+            "validation_report": "/FukiKae/project/validation/local_test_report.json",
+            "output_mp4": "/FukiKae/project/output/dubbed.ja.burned.mp4",
+            "stage_statuses": [{"stage": "validate", "status": "complete"}],
+        },
+    )
+
+    assert "実行結果" in html
+    assert "出力MP4" in html
+    assert "/FukiKae/project/output/dubbed.ja.burned.mp4" in html
+    assert "<pre>" not in html
+    assert "出力artifact" not in html
 
 
 def test_upload_source_video_endpoint_saves_browser_selected_file(tmp_path):

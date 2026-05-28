@@ -86,7 +86,7 @@ def render_studio_home(
   <meta charset="utf-8">
   <title>FukiKae Studio ローカルWeb Alpha</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; line-height: 1.45; color: #17202a; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; line-height: 1.45; color: #17202a; background: #ffffff; }}
     main {{ max-width: 960px; margin: 0 auto; }}
     label {{ display: block; font-weight: 700; margin-top: 1rem; }}
     input[type="text"], input[type="password"], select {{ width: 100%; padding: 0.55rem; font-size: 1rem; box-sizing: border-box; }}
@@ -272,14 +272,6 @@ def render_studio_home(
     <label><input type="checkbox" name="overwrite"> 既存artifactの上書きを許可</label>
     <button type="submit">ローカルパイプラインを実行</button>
   </form>
-
-  <section class="notice">
-    <h2>出力artifact</h2>
-    <ul>
-      <li><code>validation/local_test_report.json</code></li>
-      <li><code>output/dubbed.ja.mp4</code></li>
-    </ul>
-  </section>
 
   {result_html}
 </main>
@@ -517,12 +509,11 @@ def _render_result(result: Mapping[str, object]) -> str:
         if isinstance(stage, Mapping)
     )
     return f"""<section class="result">
-  <h2>前回の実行</h2>
+  <h2>実行結果</h2>
   <p>ステータス: <strong>{escape(str(result.get('status', 'unknown')))}</strong></p>
-  <p>検証レポート: <code>{escape(str(result.get('validation_report', 'validation/local_test_report.json')))}</code></p>
   <p>出力MP4: <code>{escape(str(result.get('output_mp4', 'output/dubbed.ja.mp4')))}</code></p>
+  <p>検証レポート: <code>{escape(str(result.get('validation_report', 'validation/local_test_report.json')))}</code></p>
   <ul>{rows}</ul>
-  <pre>{escape(json.dumps(result, ensure_ascii=False, indent=2))}</pre>
 </section>"""
 
 
@@ -530,7 +521,7 @@ def _render_empty_result() -> str:
     return """<section class="result">
   <h2>実行ステータス</h2>
   <p>このブラウザセッションでは、まだローカル実行を開始していません。</p>
-  <p>実行後、このパネルにステージ状態、<code>validation/local_test_report.json</code>、出力MP4パスが表示されます。</p>
+  <p>実行後、このパネルにステータス、出力MP4、検証レポートが表示されます。</p>
 </section>"""
 
 
