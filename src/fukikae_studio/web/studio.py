@@ -3,6 +3,8 @@ import json
 import re
 import secrets
 import shutil
+import subprocess
+import sys
 import webbrowser
 from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,6 +22,7 @@ from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUB
 PipelineRunner = Callable[..., Mapping[str, Any]]
 LivePipelineRunner = Callable[..., Mapping[str, Any]]
 ClientFactory = Callable[[XAIConfig], Any]
+DirectoryPicker = Callable[[Optional[str]], Optional[Path]]
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -80,6 +83,7 @@ def render_studio_home(
     error_html = f'<section class="error"><h2>Error</h2><pre>{escape(error)}</pre></section>' if error else ""
     action = f"/run?key={quote(access_key)}"
     source_video_upload_url = json.dumps(f"/upload-source-video?key={quote(access_key)}")
+    project_directory_choose_url = json.dumps(f"/choose-project-directory?key={quote(access_key)}")
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -120,6 +124,12 @@ def render_studio_home(
     }}
     function setVideoPickerStatus(message) {{
       const status = document.getElementById("source-video-picker-status");
+      if (status) {{
+        status.textContent = message;
+      }}
+    }}
+    function setProjectDirectoryPickerStatus(message) {{
+      const status = document.getElementById("project-directory-picker-status");
       if (status) {{
         status.textContent = message;
       }}
@@ -169,6 +179,39 @@ def render_studio_home(
         }}
       }}
     }}
+    async function chooseProjectDirectory() {{
+      const input = document.querySelector('input[name="project"]');
+      const button = document.querySelector('[data-directory-open-target="project"]');
+      if (!input || !button) {{
+        return;
+      }}
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = "選択中...";
+      setProjectDirectoryPickerStatus("");
+      try {{
+        const response = await fetch({project_directory_choose_url}, {{
+          method: "POST",
+          headers: {{ "Accept": "application/json", "Content-Type": "application/json" }},
+          body: JSON.stringify({{ current_path: input.value }})
+        }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "出力先フォルダの選択に失敗しました。");
+        }}
+        if (payload.path) {{
+          input.value = payload.path;
+          setProjectDirectoryPickerStatus("出力先を選択しました。");
+        }} else {{
+          setProjectDirectoryPickerStatus("選択をキャンセルしました。");
+        }}
+      }} catch (error) {{
+        setProjectDirectoryPickerStatus(error.message || "出力先フォルダの選択に失敗しました。");
+      }} finally {{
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }}
+    }}
     window.addEventListener("DOMContentLoaded", () => {{
       const selector = document.querySelector('select[name="run_mode"]');
       if (selector) {{
@@ -215,8 +258,12 @@ def render_studio_home(
     <input id="source-video-file" class="visually-hidden" type="file" accept="video/*,.mp4,.mov,.m4v,.mkv,.webm" onchange="uploadSourceVideo(this)">
     <p id="source-video-picker-status" class="field-status" role="status" aria-live="polite"></p>
 
-    <label>プロジェクトディレクトリ（出力先）</label>
-    <input type="text" name="project" value="{_default(defaults, 'project')}">
+    <label for="project-directory-path">プロジェクトディレクトリ（出力先）</label>
+    <div class="path-picker">
+      <input id="project-directory-path" type="text" name="project" value="{_default(defaults, 'project')}">
+      <button type="button" data-directory-open-target="project" onclick="chooseProjectDirectory()">Directory open</button>
+    </div>
+    <p id="project-directory-picker-status" class="field-status" role="status" aria-live="polite"></p>
 
     <section class="notice" data-mode-section="fixture">
       <h2>Fixture入力</h2>
@@ -337,6 +384,24 @@ def save_uploaded_source_video(file_obj: IO[bytes], original_filename: str, uplo
     return destination
 
 
+def choose_project_directory(current_path: Optional[str] = None) -> Optional[Path]:
+    if sys.platform != "darwin":
+        raise RuntimeError("Directory openは現在macOSのローカル実行でのみ利用できます。")
+    command = [
+        "osascript",
+        "-e",
+        'POSIX path of (choose folder with prompt "出力先フォルダを選択してください")',
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode == 0:
+        selected_path = completed.stdout.strip()
+        return Path(selected_path) if selected_path else None
+    stderr = completed.stderr.strip()
+    if "User canceled" in stderr or "(-128)" in stderr:
+        return None
+    raise RuntimeError(stderr or "出力先フォルダの選択に失敗しました。")
+
+
 def _safe_upload_filename(original_filename: str) -> str:
     source_name = Path(original_filename or "source_video.mp4").name
     source_path = Path(source_name)
@@ -362,6 +427,7 @@ def make_studio_handler(
     access_key: str,
     pipeline_runner: PipelineRunner = run_fixture_pipeline,
     upload_dir: Optional[Path] = None,
+    directory_picker: DirectoryPicker = choose_project_directory,
 ):
     source_upload_dir = Path(upload_dir) if upload_dir is not None else Path.cwd() / DEFAULT_UPLOAD_DIR
 
@@ -385,6 +451,16 @@ def make_studio_handler(
                 try:
                     saved_path = self._save_uploaded_source_video(source_upload_dir)
                     self._send_json({"path": str(saved_path), "filename": saved_path.name})
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, status=400)
+                return
+            if parsed.path == "/choose-project-directory":
+                try:
+                    selected_path = directory_picker(self._project_directory_current_path())
+                    if selected_path is None:
+                        self._send_json({"cancelled": True})
+                    else:
+                        self._send_json({"path": str(selected_path)})
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=400)
                 return
@@ -432,6 +508,18 @@ def make_studio_handler(
             if field is None or not getattr(field, "filename", ""):
                 raise ValueError("動画ファイルが選択されていません。")
             return save_uploaded_source_video(field.file, str(field.filename), upload_dir)
+
+        def _project_directory_current_path(self) -> Optional[str]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                return None
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            if not isinstance(payload, Mapping):
+                return None
+            current_path = payload.get("current_path")
+            if current_path is None:
+                return None
+            return str(current_path)
 
         def _send_json(self, payload: Mapping[str, object], status: int = 200) -> None:
             self._send_text(json.dumps(payload, indent=2) + "\n", status=status, content_type="application/json")

@@ -49,6 +49,11 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert "/upload-source-video?key=abc123" in html
     assert "/choose-source-video" not in html
     assert 'name="project"' in html
+    assert 'id="project-directory-path"' in html
+    assert 'data-directory-open-target="project"' in html
+    assert "Directory open" in html
+    assert "chooseProjectDirectory" in html
+    assert "/choose-project-directory?key=abc123" in html
     assert '<select name="voice">' in html
     assert '<option value="d0cb9ff07d95" selected>Sakura 女性 / 日本語</option>' in html
     assert '<option value="b1a7441b97a1">Ren 男性 / 日本語</option>' in html
@@ -126,6 +131,36 @@ def test_upload_source_video_endpoint_saves_browser_selected_file(tmp_path):
         saved_video = upload_dir / "sample_video.mp4"
         assert payload == {"path": str(saved_video), "filename": "sample_video.mp4"}
         assert saved_video.read_bytes() == b"local video bytes"
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+
+def test_choose_project_directory_endpoint_returns_selected_path(tmp_path):
+    selected_dir = tmp_path / "selected"
+    current_dir = tmp_path / "current"
+    calls = []
+
+    def fake_directory_picker(current_path):
+        calls.append(current_path)
+        return selected_dir
+
+    handler = make_studio_handler({}, access_key="abc123", directory_picker=fake_directory_picker)
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/choose-project-directory?key=abc123",
+            data=json.dumps({"current_path": str(current_dir)}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        assert payload == {"path": str(selected_dir)}
+        assert calls == [str(current_dir)]
     finally:
         server.shutdown()
         thread.join(timeout=3)
