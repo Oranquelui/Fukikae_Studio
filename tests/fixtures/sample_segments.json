@@ -1,0 +1,32 @@
+[
+  {
+    "id": "seg_0001",
+    "source_start_ms": 0,
+    "source_end_ms": 2400,
+    "speaker": "SPEAKER_00",
+    "source_lang": "auto",
+    "source_text": "Hello, welcome to the demo.",
+    "target_lang": "ja",
+    "target_text": null,
+    "dub_start_ms": 0,
+    "dub_end_ms": 2400,
+    "tts_audio_path": null,
+    "timing_strategy": "fit_to_source_segment",
+    "status": "stt_complete"
+  },
+  {
+    "id": "seg_0002",
+    "source_start_ms": 2500,
+    "source_end_ms": 4900,
+    "speaker": "SPEAKER_00",
+    "source_lang": "auto",
+    "source_text": "Let's begin.",
+    "target_lang": "ja",
+    "target_text": null,
+    "dub_start_ms": 2500,
+    "dub_end_ms": 4900,
+    "tts_audio_path": null,
+    "timing_strategy": "fit_to_source_segment",
+    "status": "stt_complete"
+  }
+]

@@ -1,0 +1,3 @@
+{
+  "output_text": "{\"segments\":[{\"id\":\"seg_0001\",\"source_start_ms\":0,\"source_end_ms\":2400,\"speaker\":\"SPEAKER_00\",\"source_text\":\"Hello, welcome to the demo.\",\"target_text\":\"こんにちは、デモへようこそ。\",\"reading_hint\":\"こんにちは、デモへようこそ。\",\"style_notes\":\"natural Japanese dub, concise enough for timing\",\"estimated_duration_ms\":2400,\"priority\":\"preserve_meaning_and_timing\"},{\"id\":\"seg_0002\",\"source_start_ms\":2500,\"source_end_ms\":4900,\"speaker\":\"SPEAKER_00\",\"source_text\":\"Let's begin.\",\"target_text\":\"始めましょう。\",\"reading_hint\":\"はじめましょう。\",\"style_notes\":\"natural Japanese dub, concise enough for timing\",\"estimated_duration_ms\":2400,\"priority\":\"preserve_meaning_and_timing\"}]}"
+}

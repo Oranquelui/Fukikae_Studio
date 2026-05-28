@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtualenv
+.venv/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+env.local
+env.local.*
+
+# Local FukiKae work artifacts
+work/
+dev-inputs/
+test_temp/
+.hermes/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,17 @@
+{
+  "text": "Hello, welcome to the demo. Let's begin.",
+  "duration": 4.9,
+  "words": [
+    {"start": 0.0, "end": 0.5, "text": "Hello", "speaker": 0},
+    {"start": 0.5, "end": 1.2, "text": "welcome", "speaker": 0},
+    {"start": 1.2, "end": 1.5, "text": "to", "speaker": 0},
+    {"start": 1.5, "end": 1.8, "text": "the", "speaker": 0},
+    {"start": 1.8, "end": 2.4, "text": "demo.", "speaker": 0},
+    {"start": 2.5, "end": 3.1, "text": "Let's", "speaker": 0},
+    {"start": 3.1, "end": 4.9, "text": "begin.", "speaker": 0}
+  ],
+  "segments": [
+    {"start": 0.0, "end": 2.4, "text": "Hello, welcome to the demo.", "speaker": 0},
+    {"start": 2.5, "end": 4.9, "text": "Let's begin.", "speaker": 0}
+  ]
+}

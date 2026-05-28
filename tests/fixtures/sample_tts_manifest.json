@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "provider": "xai",
+  "endpoint": "/v1/tts",
+  "language": "ja",
+  "voice": "eve",
+  "segments": [
+    {
+      "id": "seg_0001",
+      "text": "こんにちは、デモへようこそ。",
+      "output_audio": "tts/segment_0001.wav",
+      "duration_ms": 2200,
+      "target_slot_start_ms": 0,
+      "target_slot_end_ms": 2400
+    },
+    {
+      "id": "seg_0002",
+      "text": "始めましょう。",
+      "output_audio": "tts/segment_0002.wav",
+      "duration_ms": 1300,
+      "target_slot_start_ms": 2500,
+      "target_slot_end_ms": 4900
+    }
+  ]
+}

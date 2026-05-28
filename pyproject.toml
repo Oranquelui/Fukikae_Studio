@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fukikae-studio"
+version = "0.1.0"
+description = "Local-first xAI-only Japanese dubbing CLI MVP."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["Pillow>=10"]
+
+[project.scripts]
+fukikae = "fukikae_studio.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
