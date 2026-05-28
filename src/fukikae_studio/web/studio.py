@@ -315,8 +315,8 @@ def render_studio_home(
       </div>
     </div>
 
-    <label><input type="checkbox" name="execute_ffmpeg"> ローカルFFmpegで最終レンダーを実行</label>
-    <label><input type="checkbox" name="overwrite"> 既存artifactの上書きを許可</label>
+    <label><input type="checkbox" name="execute_ffmpeg"{_checked(defaults, 'execute_ffmpeg')}> ローカルFFmpegで最終レンダーを実行</label>
+    <label><input type="checkbox" name="overwrite"{_checked(defaults, 'overwrite')}> 同じ出力先を再実行する（既存ファイルを上書き）</label>
     <button type="submit">ローカルパイプラインを実行</button>
   </form>
 
@@ -617,6 +617,8 @@ def _render_error(error: str) -> str:
 def _friendly_error_message(error: str) -> str:
     raw_error = str(error)
     normalized = raw_error.lower()
+    if "refusing to overwrite existing artifact" in normalized:
+        return "出力先に既存ファイルがあります。同じ出力先を再実行する場合は「同じ出力先を再実行する」をONにしてください。"
     if "source video was not found" in normalized:
         return "ソース動画が見つかりません。File openで動画を選択してください。"
     if "incorrect api key" in normalized:
@@ -650,11 +652,17 @@ def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping
     ):
         if key in form:
             merged[key] = str(form[key])
+    for key in ("execute_ffmpeg", "overwrite"):
+        merged[key] = _form_bool(form, key)
     return merged
 
 
 def _default(defaults: Mapping[str, object], key: str, fallback: str = "") -> str:
     return escape(str(defaults.get(key, fallback)), quote=True)
+
+
+def _checked(defaults: Mapping[str, object], key: str) -> str:
+    return " checked" if _form_bool(defaults, key) else ""
 
 
 def _render_voice_options(selected_voice: str) -> str:

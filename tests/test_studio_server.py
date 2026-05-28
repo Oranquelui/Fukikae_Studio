@@ -77,6 +77,7 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert 'type="password" name="xai_api_key" value=""' in html
     assert "このローカル実行中だけ使用" in html
     assert 'name="execute_ffmpeg"' in html
+    assert "同じ出力先を再実行する" in html
     assert "work/local-smoke/source.mp4" in html
     assert "実行ステータス" not in html
     assert "まだローカル実行を開始していません" not in html
@@ -125,6 +126,20 @@ def test_render_studio_home_sanitizes_missing_source_video_errors():
     assert "ソース動画が見つかりません" in html
     assert "File openで動画を選択してください" in html
     assert "Source video was not found" not in html
+    assert "<pre>" not in html
+
+
+def test_render_studio_home_sanitizes_existing_artifact_errors():
+    html = render_studio_home(
+        {},
+        access_key="abc123",
+        error="Refusing to overwrite existing artifact: /tmp/project/input/source.mp4",
+    )
+
+    assert "出力先に既存ファイルがあります" in html
+    assert "同じ出力先を再実行する" in html
+    assert "Refusing to overwrite" not in html
+    assert "/tmp/project/input/source.mp4" not in html
     assert "<pre>" not in html
 
 
@@ -239,6 +254,8 @@ def test_run_endpoint_preserves_submitted_paths_after_error(tmp_path):
                 "target_lang": "ja",
                 "voice": "d0cb9ff07d95",
                 "subtitle_output": "both",
+                "execute_ffmpeg": "on",
+                "overwrite": "on",
             }
         ).encode("utf-8")
         request = urllib.request.Request(
@@ -257,6 +274,8 @@ def test_run_endpoint_preserves_submitted_paths_after_error(tmp_path):
         assert "ソース動画が見つかりません" in html
         assert str(submitted_video) in html
         assert str(submitted_project) in html
+        assert 'name="execute_ffmpeg" checked' in html
+        assert 'name="overwrite" checked' in html
         assert "work/local-smoke/source.mp4" not in html
     finally:
         server.shutdown()
