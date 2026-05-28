@@ -86,6 +86,23 @@ def test_render_studio_home_never_echoes_xai_api_key_defaults():
     assert 'type="password" name="xai_api_key" value=""' in html
 
 
+def test_render_studio_home_sanitizes_invalid_xai_api_key_errors():
+    html = render_studio_home(
+        {},
+        access_key="abc123",
+        error=(
+            'xAI request failed with HTTP 400: {"code":"Client specified an invalid argument",'
+            '"error":"Incorrect API key provided: xa****mc. You can obtain an API key"}'
+        ),
+    )
+
+    assert "xAI API Keyが正しくありません" in html
+    assert "設定を開いてAPI Keyを確認してください" in html
+    assert "Incorrect API key" not in html
+    assert "xa****mc" not in html
+    assert "<pre>" not in html
+
+
 def test_render_studio_home_shows_concise_result_without_raw_json():
     html = render_studio_home(
         {},

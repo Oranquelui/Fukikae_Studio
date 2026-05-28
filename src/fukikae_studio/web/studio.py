@@ -80,7 +80,7 @@ def render_studio_home(
     error: Optional[str] = None,
 ) -> str:
     result_html = _render_result(last_result) if last_result is not None else _render_empty_result()
-    error_html = f'<section class="error"><h2>Error</h2><pre>{escape(error)}</pre></section>' if error else ""
+    error_html = _render_error(error) if error else ""
     action = f"/run?key={quote(access_key)}"
     source_video_upload_url = json.dumps(f"/upload-source-video?key={quote(access_key)}")
     project_directory_choose_url = json.dumps(f"/choose-project-directory?key={quote(access_key)}")
@@ -603,6 +603,26 @@ def _render_result(result: Mapping[str, object]) -> str:
   <p>検証レポート: <code>{escape(str(result.get('validation_report', 'validation/local_test_report.json')))}</code></p>
   <ul>{rows}</ul>
 </section>"""
+
+
+def _render_error(error: str) -> str:
+    message = _friendly_error_message(error)
+    return f"""<section class="error">
+  <h2>エラー</h2>
+  <p>{escape(message)}</p>
+</section>"""
+
+
+def _friendly_error_message(error: str) -> str:
+    raw_error = str(error)
+    normalized = raw_error.lower()
+    if "incorrect api key" in normalized:
+        return "xAI API Keyが正しくありません。設定を開いてAPI Keyを確認してください。"
+    if "xai_api_key is required" in normalized:
+        return "xAI API Keyを入力してください。設定を開いてAPI Keyを入力してください。"
+    if "xai request failed" in normalized:
+        return "xAI APIの呼び出しに失敗しました。API Key、モデル名、ネットワーク状態を確認してください。"
+    return raw_error
 
 
 def _render_empty_result() -> str:
