@@ -1,59 +1,159 @@
 # FukiKae Studio
 
-FukiKae Studio is a local-first CLI MVP for turning a local video file into a Japanese-dubbed MP4.
+FukiKae Studioは、ローカル動画を日本語吹き替えMP4に変換する、ローカルファーストのオープン開発ツールです。動画ファイルを外部SaaSへ預けず、自分のPC上で音声抽出、STT、翻訳・吹き替え台本生成、TTS、字幕生成、MP4レンダーを実行します。
 
-Current MVP status:
+このリポジトリの配布版は、まず内部beta・個人検証向けです。商用SaaSではなく、アプリ自体は無料です。Live xAIモードを使う場合は、ユーザー自身のxAI API Keyが必要で、発生する費用はxAI APIの従量課金です。
 
-- Local Python CLI with deterministic, fixture-testable stages.
-- Implemented local stages: `init`, `inspect`, `extract-audio`, `stt`, `make-script`, `tts`, `assemble`, `validate`, fixture-backed `run`, and local Web UI alpha `studio`.
-- `assemble` writes timeline, mix-plan, subtitle, assembly manifest, and final MP4 mux command-plan artifacts.
-- `run --execute-ffmpeg` can render local fixture-backed MP4 outputs.
-- `studio` starts a localhost form for fixture or live xAI execution, local path selection, voice selection, subtitle output selection, stage status, validation report, and final MP4 path display.
-- Default share output is burned captions at `output/dubbed.ja.burned.mp4`; soft subtitles remain available at `output/dubbed.ja.mp4`.
-- Default tests and CLI fixture paths do not perform live xAI API calls.
-- AI boundary policy: xAI only.
-- Primary input is a local video file.
+## なぜ作ったのか
 
-## Development
+動画の吹き替えは、AI SaaSにアップロードすれば簡単に試せます。一方で、ニュース素材、顧客素材、未公開動画、制作途中の素材では、アップロード先、保存期間、再利用、チーム権限、月額費用が気になります。
 
-Use the project-local virtual environment:
+FukiKae Studioは次の目的で作っています。
+
+- ローカル動画をできるだけ外に出さずに日本語吹き替えを作る。
+- AI SaaSの月額・クレジット制ではなく、ユーザー自身のxAI API使用量だけで検証できるようにする。
+- STT、翻訳、TTS、字幕、最終muxを分解し、どこで失敗したか見えるようにする。
+- Grokで翻訳文の長さを調整し、元動画の発話タイミングに近い日本語吹き替えを作る。
+- 焼き込み字幕とソフト字幕の両方を比較できるようにする。
+
+## できること
+
+- ローカルWeb UI alphaを起動して、ブラウザから動画を選択できます。
+- Live xAIモードで、xAI STT、Grok 4.3、xAI TTSを使った日本語吹き替えを生成できます。
+- Fixture betaモードで、APIなしのローカルテストを実行できます。
+- Sakura female / Japanese、Ren male / JapaneseなどのxAI Voiceを選択できます。
+- 焼き込み字幕、ソフト字幕、両方の出力を選べます。
+- 最終出力、検証レポート、中間artifactをローカルプロジェクトディレクトリに残します。
+
+## 料金の考え方
+
+FukiKae Studio自体は無料です。サーバー利用料、月額利用料、FukiKae側の手数料はありません。
+
+Live xAIモードで必要なのは、ユーザー自身のxAI API Keyです。API費用はxAIから直接請求されます。xAI公式Pricingでは、2026-05-28時点で次の価格が公開されています。
+
+| 項目 | 価格 |
+| --- | ---: |
+| Grok 4.3 input | $1.25 / 1M tokens |
+| Grok 4.3 output | $2.50 / 1M tokens |
+| xAI Speech to Text REST | $0.10 / hour |
+| xAI Text to Speech | $15.00 / 1M characters |
+
+出典: [xAI Pricing](https://docs.x.ai/developers/pricing)、[xAI Models](https://docs.x.ai/developers/models)
+
+### 目安
+
+10分の一般的なナレーション動画を例にすると、概算は次のようになります。
+
+| 処理 | 仮定 | 概算 |
+| --- | --- | ---: |
+| STT | 10分 = 0.166時間 | 約$0.017 |
+| Grok 4.3 | input 8k tokens / output 6k tokens | 約$0.025 |
+| TTS | 日本語3,000から6,000文字 | 約$0.045から$0.090 |
+| 合計 | 1回生成、リトライなし | 約$0.09から$0.13 |
+
+60分動画なら、内容量が同程度に比例すると仮定して約$0.54から$0.78程度が一つの目安です。実際の費用は、発話量、翻訳の長さ、リトライ回数、モデル設定、xAI側の最新価格で変わります。
+
+### AI SaaSと比べて何が安いのか
+
+FukiKae Studioは、SaaSのような月額料金、クレジット購入、保存料、チーム機能料、プラットフォーム手数料を載せません。つまり「FukiKae側の上乗せ」は0です。
+
+ただし、SaaSごとの料金体系は月額、分単位、クレジット制、商用ライセンス込みなどで違うため、単純なtoken単価比較はできません。正確に言うと、FukiKae Studioは「モデル/API原価に近い形で試せる」ことが利点です。低頻度の検証やサンプル制作では、月額SaaSを契約するより大きく安くなる可能性があります。
+
+## 必要なもの
+
+- macOSまたはLinux
+- Python 3.9以上
+- FFmpeg / ffprobe
+- xAI API Key（Live xAIモードのみ）
+
+macOSでFFmpegがない場合:
 
 ```bash
-.venv/bin/python -m pytest tests -q
+brew install ffmpeg
+```
+
+## インストール
+
+GitHubからcloneします。
+
+```bash
+gh repo clone Oranquelui/Fukikae_Studio
+cd Fukikae_Studio
+```
+
+GitHub CLIを使わない場合:
+
+```bash
+git clone https://github.com/Oranquelui/Fukikae_Studio.git
+cd Fukikae_Studio
+```
+
+Python仮想環境を作ります。
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e . pytest
+```
+
+動作確認:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest
 PYTHONPATH=src .venv/bin/python -m fukikae_studio --help
 ```
 
-## Local fixture smoke test
+## xAI API Keyの設定
 
-The default local smoke path uses sanitized fixtures and does not call live xAI APIs. For the fastest repeatable check, run the solo beta smoke script; by default it writes to a temporary directory outside the repository:
-
-```bash
-PYTHONPATH=src .venv/bin/python scripts/local_beta_smoke.py
-```
-
-To keep artifacts for inspection:
+`.env.example`をコピーして、自分のAPI Keyを入れます。
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/local_beta_smoke.py --workdir /tmp/fukikae-local-smoke --keep
+cp .env.example env.local.
 ```
 
-## Internal beta preflight
-
-Before a local internal beta session, run the preflight check. It runs tests, CLI help, localhost Web health, and a fixture-backed MP4 smoke render while keeping generated artifacts outside the repository:
+`env.local.`の例:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/internal_beta_check.py
+XAI_API_KEY=your_xai_api_key_here
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_TEXT_MODEL=grok-4.3
+XAI_STT_LANGUAGE=auto
+XAI_TTS_VOICE=d0cb9ff07d95
+XAI_TTS_LANGUAGE=ja
 ```
 
-Expected result:
+`env.local.`は`.gitignore`対象です。GitHubへpushしないでください。
 
-- `Internal beta preflight: GO`
-- retained smoke artifacts under `/tmp/fukikae-internal-beta-preflight/smoke`
-- final MP4 at `/tmp/fukikae-internal-beta-preflight/smoke/project/output/dubbed.ja.mp4`
+## 使い方: Local Web UI
 
-## Live xAI local run
+一番簡単な使い方です。
 
-For an actual local dubbing run, use `run-live`. Pass the local env file directly; do not `source` it in the shell:
+```bash
+PYTHONPATH=src .venv/bin/python -m fukikae_studio studio
+```
+
+ターミナルに表示されたURLを開きます。
+
+```text
+http://127.0.0.1:8765/?key=...
+```
+
+画面で行うこと:
+
+1. 実行モードで`Live xAIモード`を選ぶ。
+2. `File open`でソース動画を選ぶ。
+3. プロジェクトディレクトリを指定する。
+4. `設定`を開いてxAI API Keyを入力する。
+5. Voiceを選ぶ。
+6. 字幕出力を選ぶ。
+7. `ローカルFFmpegで最終レンダーを実行`をONにする。
+8. `ローカルパイプラインを実行`を押す。
+
+`File open`で選んだ動画は外部にアップロードされません。localhostの`work/studio-uploads/`へローカルコピーされ、そのコピー先パスがフォームへ入ります。
+
+## 使い方: CLI Live xAI
+
+Web UIではなくCLIで実行する場合:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m fukikae_studio run-live \
@@ -64,75 +164,74 @@ PYTHONPATH=src .venv/bin/python -m fukikae_studio run-live \
   --overwrite
 ```
 
-`run-live` loads xAI credentials without printing them, extracts local audio, calls xAI STT, asks Grok for the Japanese dubbing script, synthesizes Japanese TTS, and writes `output/dubbed.ja.mp4`.
-
-Use `--subtitle-output burned`, `--subtitle-output soft`, or `--subtitle-output both`
-to choose the final render. The default is `both`, with the burned-caption MP4
-treated as the share-ready output.
-
-Manual equivalent:
+字幕出力を指定できます。
 
 ```bash
-mkdir -p work/local-smoke
-ffmpeg -hide_banner -loglevel error -y \
-  -f lavfi -i testsrc=size=320x180:rate=25 \
-  -f lavfi -i sine=frequency=440:sample_rate=48000 \
-  -t 5 -c:v libx264 -pix_fmt yuv420p -c:a aac \
-  work/local-smoke/source.mp4
-ffmpeg -hide_banner -loglevel error -y \
-  -f lavfi -i sine=frequency=880:duration=0.8:sample_rate=16000 \
-  -ac 1 -c:a pcm_s16le \
-  work/local-smoke/fixture.wav
-PYTHONPATH=src .venv/bin/python -m fukikae_studio run \
-  --video work/local-smoke/source.mp4 \
-  --project work/local-smoke/project \
-  --fixture-stt-response tests/fixtures/sample_stt_response.json \
-  --fixture-dubbing-response tests/fixtures/sample_dubbing_response.json \
-  --fixture-audio work/local-smoke/fixture.wav \
-  --execute-ffmpeg
+--subtitle-output both
+--subtitle-output burned
+--subtitle-output soft
 ```
 
-Expected result:
+デフォルトは`both`です。共有用には焼き込み字幕の`output/dubbed.ja.burned.mp4`を確認してください。
 
-- `validation/local_test_report.json` has `status: complete`.
-- `output/dubbed.ja.burned.mp4` exists in the selected project directory when using the default subtitle output.
-- The burned MP4 contains generated Japanese narration audio and visible Japanese captions. The soft MP4 contains a Japanese subtitle track.
+## 使い方: APIなしのFixtureテスト
 
-## Local Web UI alpha
-
-The local Web UI alpha is a thin browser form over the same CLI pipeline. It binds to loopback by default and prints a generated access URL in the terminal:
+xAI API Keyなしで、ローカルfixtureだけを使ったテストができます。
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m fukikae_studio studio
+PYTHONPATH=src .venv/bin/python scripts/local_beta_smoke.py --keep
 ```
 
-Default bind:
+内部beta前の一括確認:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/internal_beta_check.py
+```
+
+成功時は次のように表示されます。
 
 ```text
-127.0.0.1:8765
+Internal beta preflight: GO
+GO: local internal beta checks passed.
 ```
 
-The form supports:
+## 出力ファイル
 
-- local source video path,
-- local project directory,
-- sanitized STT fixture path,
-- sanitized dubbing fixture path,
-- local fixture audio path,
-- fixture or live xAI run mode,
-- local-only xAI API key entry for live mode,
-- Sakura/Ren/Eve voice selection,
-- burned/soft/both subtitle output selection,
-- optional local FFmpeg final render,
-- stage status display,
-- `validation/local_test_report.json` display,
-- final MP4 display.
+プロジェクトディレクトリ内に主なartifactが生成されます。
 
-This alpha does not upload media, create hosted storage, or start a cloud queue.
-The xAI API key field is only used for the local live run and is not echoed back
-into the page.
+| パス | 内容 |
+| --- | --- |
+| `input/source.mp4` | 入力動画コピー |
+| `audio/stt_input.wav` | STT用音声 |
+| `stt/normalized_segments.json` | 正規化された文字起こしセグメント |
+| `script/dubbing_segments.json` | Grokが生成した日本語吹き替えセグメント |
+| `tts/` | TTS音声とmanifest |
+| `assembly/japanese_subtitles.srt` | 日本語SRT字幕 |
+| `assembly/japanese_subtitles.ass` | 焼き込み用ASS字幕 |
+| `output/dubbed.ja.burned.mp4` | 焼き込み字幕つきMP4 |
+| `output/dubbed.ja.mp4` | ソフト字幕つきMP4 |
+| `validation/local_test_report.json` | 検証レポート |
 
-## Public docs
+## Voice
+
+現在のUIでは次を選べます。
+
+| 表示 | voice_id | language |
+| --- | --- | --- |
+| Sakura 女性 / 日本語 | `d0cb9ff07d95` | `ja` |
+| Ren 男性 / 日本語 | `b1a7441b97a1` | `ja` |
+| Eve 女性 / 多言語 | `eve` | `multilingual` |
+
+## 注意
+
+- このalphaはローカル実行前提です。
+- localhost以外へのbindは拒否します。
+- API Keyは画面へ再表示しません。
+- `work/`、`test_temp/`、`.venv/`、`env.local*`は配布対象外です。
+- 生成結果の品質は、入力音声、STT品質、翻訳長、TTS voice、FFmpeg環境に左右されます。
+- xAIの料金とモデル提供状況は変わる可能性があります。最新情報は[xAI Pricing](https://docs.x.ai/developers/pricing)を確認してください。
+
+## 開発者向けドキュメント
 
 - [Solo Local Beta Test](docs/SOLO_BETA_TEST.md)
 - [CLI MVP](docs/CLI_MVP.md)
