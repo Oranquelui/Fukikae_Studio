@@ -75,6 +75,8 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert "このローカル実行中だけ使用" in html
     assert 'name="execute_ffmpeg"' in html
     assert "work/local-smoke/source.mp4" in html
+    assert "実行ステータス" not in html
+    assert "まだローカル実行を開始していません" not in html
 
 
 def test_render_studio_home_never_echoes_xai_api_key_defaults():

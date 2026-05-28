@@ -606,11 +606,7 @@ def _render_result(result: Mapping[str, object]) -> str:
 
 
 def _render_empty_result() -> str:
-    return """<section class="result">
-  <h2>実行ステータス</h2>
-  <p>このブラウザセッションでは、まだローカル実行を開始していません。</p>
-  <p>実行後、このパネルにステータス、出力MP4、検証レポートが表示されます。</p>
-</section>"""
+    return ""
 
 
 def _default(defaults: Mapping[str, object], key: str, fallback: str = "") -> str:
