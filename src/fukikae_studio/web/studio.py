@@ -30,6 +30,17 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_UPLOAD_DIR = Path("work") / "studio-uploads"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+GENERATED_PROJECT_ARTIFACTS = (
+    "input",
+    "media",
+    "stt",
+    "assembly",
+    "output",
+    "script",
+    "tts",
+    "validation",
+    "project.json",
+)
 STUDIO_STAGES = (
     "init",
     "stt",
@@ -66,6 +77,7 @@ def default_studio_form_values(repo_root: Optional[Path] = None) -> dict:
         "run_mode": "live",
         "xai_base_url": DEFAULT_XAI_BASE_URL,
         "xai_text_model": DEFAULT_XAI_TEXT_MODEL,
+        "clean_output": True,
     }
 
 
@@ -245,6 +257,10 @@ def render_studio_home(
       }}
       if (report) {{
         report.textContent = result.validation_report || "";
+      }}
+      const reportRow = document.getElementById("async-result-report-row");
+      if (reportRow) {{
+        reportRow.hidden = !result.validation_report;
       }}
       panel.hidden = false;
       setRunButtonBusy(false);
@@ -446,7 +462,7 @@ def render_studio_home(
     <h2>実行結果</h2>
     <p>ステータス: <strong id="async-result-status"></strong></p>
     <p>出力MP4: <code id="async-result-output"></code></p>
-    <p>検証レポート: <code id="async-result-report"></code></p>
+    <p id="async-result-report-row">検証レポート: <code id="async-result-report"></code></p>
   </section>
 
   <form id="pipeline-run-form" method="post" action="{escape(action)}">
@@ -532,6 +548,7 @@ def render_studio_home(
 
     <label><input type="checkbox" name="execute_ffmpeg"{_checked(defaults, 'execute_ffmpeg')}> ローカルFFmpegで最終レンダーを実行</label>
     <label><input type="checkbox" name="overwrite"{_checked(defaults, 'overwrite')}> 同じ出力先を再実行する（既存ファイルを上書き）</label>
+    <label><input type="checkbox" name="clean_output"{_checked(defaults, 'clean_output', default=True)}> 完成後はMP4だけを残す</label>
     <button type="submit">ローカルパイプラインを実行</button>
   </form>
 
@@ -587,7 +604,10 @@ def run_studio_form(
             execute_ffmpeg=execute_ffmpeg,
             subtitle_output=subtitle_output,
         )
-    return _build_run_summary(project_dir, result, execute_ffmpeg=execute_ffmpeg)
+    summary = _build_run_summary(project_dir, result, execute_ffmpeg=execute_ffmpeg)
+    if _form_bool(form, "clean_output"):
+        summary = _keep_only_final_mp4(project_dir, summary, overwrite=_form_bool(form, "overwrite"))
+    return summary
 
 
 class RunJobStore:
@@ -907,6 +927,68 @@ def _build_run_summary(project_dir: Path, result: Mapping[str, Any], execute_ffm
     }
 
 
+def _keep_only_final_mp4(project_dir: Path, summary: Mapping[str, Any], overwrite: bool = False) -> dict:
+    clean_summary = dict(summary)
+    if not bool(clean_summary.get("final_output_exists", False)):
+        return clean_summary
+    project = Path(project_dir)
+    final_output = Path(str(clean_summary.get("output_mp4", "")))
+    if not final_output.exists() or final_output.suffix.lower() != ".mp4":
+        return clean_summary
+    if not _path_is_inside(project, final_output):
+        return clean_summary
+
+    destination = project / final_output.name
+    if final_output.resolve(strict=False) != destination.resolve(strict=False):
+        if destination.exists() and overwrite:
+            destination.unlink()
+        elif destination.exists():
+            destination = _unique_final_mp4_path(destination)
+        shutil.copy2(final_output, destination)
+
+    for relative_path in GENERATED_PROJECT_ARTIFACTS:
+        generated_path = project / relative_path
+        if generated_path.resolve(strict=False) == destination.resolve(strict=False):
+            continue
+        _remove_generated_artifact(project, generated_path)
+
+    clean_summary["output_mp4"] = str(destination)
+    clean_summary["validation_report"] = ""
+    clean_summary["clean_output"] = True
+    return clean_summary
+
+
+def _unique_final_mp4_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 10000):
+        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("完成MP4の保存先ファイル名を確保できませんでした。")
+
+
+def _remove_generated_artifact(project_dir: Path, path: Path) -> None:
+    if not path.exists():
+        return
+    if not _path_is_inside(project_dir, path):
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _path_is_inside(project_dir: Path, path: Path) -> bool:
+    project_root = project_dir.resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    try:
+        resolved.relative_to(project_root)
+    except ValueError:
+        return False
+    return True
+
+
 def _stage_statuses(status: str, execute_ffmpeg: bool, final_output_exists: bool) -> list:
     if status == "failed":
         return [
@@ -1003,11 +1085,17 @@ def _render_result(result: Mapping[str, object]) -> str:
         for stage in stages
         if isinstance(stage, Mapping)
     )
+    validation_report = str(result.get("validation_report", ""))
+    validation_html = (
+        f'  <p>検証レポート: <code>{escape(validation_report)}</code></p>\n'
+        if validation_report
+        else ""
+    )
     return f"""<section class="result">
   <h2>実行結果</h2>
   <p>ステータス: <strong>{escape(str(result.get('status', 'unknown')))}</strong></p>
   <p>出力MP4: <code>{escape(str(result.get('output_mp4', 'output/dubbed.ja.mp4')))}</code></p>
-  <p>検証レポート: <code>{escape(str(result.get('validation_report', 'validation/local_test_report.json')))}</code></p>
+{validation_html.rstrip()}
   <ul>{rows}</ul>
 </section>"""
 
@@ -1058,7 +1146,7 @@ def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping
     ):
         if key in form:
             merged[key] = str(form[key])
-    for key in ("execute_ffmpeg", "overwrite"):
+    for key in ("execute_ffmpeg", "overwrite", "clean_output"):
         merged[key] = _form_bool(form, key)
     return merged
 
@@ -1067,7 +1155,9 @@ def _default(defaults: Mapping[str, object], key: str, fallback: str = "") -> st
     return escape(str(defaults.get(key, fallback)), quote=True)
 
 
-def _checked(defaults: Mapping[str, object], key: str) -> str:
+def _checked(defaults: Mapping[str, object], key: str, default: bool = False) -> str:
+    if key not in defaults:
+        return " checked" if default else ""
     return " checked" if _form_bool(defaults, key) else ""
 
 

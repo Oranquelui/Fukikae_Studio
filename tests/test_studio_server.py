@@ -86,6 +86,8 @@ def test_render_studio_home_exposes_local_fixture_backed_controls():
     assert "このローカル実行中だけ使用" in html
     assert 'name="execute_ffmpeg"' in html
     assert "同じ出力先を再実行する" in html
+    assert 'name="clean_output" checked' in html
+    assert "完成後はMP4だけを残す" in html
     assert "work/local-smoke/source.mp4" in html
     assert "実行ステータス" not in html
     assert "まだローカル実行を開始していません" not in html
@@ -430,6 +432,49 @@ def test_run_studio_form_uses_fixture_pipeline_and_returns_stage_statuses(tmp_pa
         {"stage": "final-mux", "status": "complete"},
         {"stage": "validate", "status": "complete"},
     ]
+
+
+def test_run_studio_form_can_keep_only_final_mp4_for_web_output(tmp_path):
+    source_video = tmp_path / "source.mp4"
+    project_dir = tmp_path / "project"
+
+    def fake_pipeline(project_dir_arg, **kwargs):
+        for relative in ("input", "media", "stt", "assembly", "script", "tts", "validation", "output"):
+            (project_dir_arg / relative).mkdir(parents=True, exist_ok=True)
+            (project_dir_arg / relative / "artifact.txt").write_text("artifact", encoding="utf-8")
+        (project_dir_arg / "project.json").write_text("{}", encoding="utf-8")
+        final_output = project_dir_arg / "output" / "dubbed.ja.burned.mp4"
+        final_output.write_bytes(b"final mp4")
+        return {
+            "validation": {
+                "status": "complete",
+                "missing_required_artifacts": [],
+                "final_output": "output/dubbed.ja.burned.mp4",
+                "final_output_exists": True,
+            }
+        }
+
+    result = run_studio_form(
+        {
+            "video": str(source_video),
+            "project": str(project_dir),
+            "stt_fixture_response": str(tmp_path / "stt.json"),
+            "dubbing_fixture_response": str(tmp_path / "dubbing.json"),
+            "fixture_audio": str(tmp_path / "fixture.wav"),
+            "source_lang": "auto",
+            "target_lang": "ja",
+            "voice": "d0cb9ff07d95",
+            "subtitle_output": "burned",
+            "clean_output": "on",
+        },
+        pipeline_runner=fake_pipeline,
+    )
+
+    final_mp4 = project_dir / "dubbed.ja.burned.mp4"
+    assert result["output_mp4"] == str(final_mp4)
+    assert result["validation_report"] == ""
+    assert final_mp4.read_bytes() == b"final mp4"
+    assert sorted(path.name for path in project_dir.iterdir()) == ["dubbed.ja.burned.mp4"]
 
 
 def test_run_studio_form_can_run_live_pipeline_with_ephemeral_xai_key(tmp_path):
