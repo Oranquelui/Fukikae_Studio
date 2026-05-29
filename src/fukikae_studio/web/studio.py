@@ -23,10 +23,15 @@ from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUB
 LivePipelineRunner = Callable[..., Mapping[str, Any]]
 ClientFactory = Callable[[XAIConfig], Any]
 DirectoryPicker = Callable[[Optional[str]], Optional[Path]]
+APIKeyLoader = Callable[[], str]
+APIKeySaver = Callable[[str], None]
+APIKeyDeleter = Callable[[], None]
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_UPLOAD_DIR = Path("work") / "studio-uploads"
+XAI_KEYCHAIN_SERVICE = "FukiKae Studio xAI API Key"
+XAI_KEYCHAIN_ACCOUNT = "default"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 GENERATED_PROJECT_ARTIFACTS = (
     "input",
@@ -102,6 +107,9 @@ def render_studio_home(
     action = f"/run?key={quote(access_key)}"
     source_video_upload_url = json.dumps(f"/upload-source-video?key={quote(access_key)}")
     project_directory_choose_url = json.dumps(f"/choose-project-directory?key={quote(access_key)}")
+    xai_api_key_status_url = json.dumps(f"/xai-api-key-status?key={quote(access_key)}")
+    xai_api_key_save_url = json.dumps(f"/save-xai-api-key?key={quote(access_key)}")
+    xai_api_key_delete_url = json.dumps(f"/delete-xai-api-key?key={quote(access_key)}")
     stage_labels_json = json.dumps(STUDIO_STAGE_LABELS, ensure_ascii=False)
     initial_stage_statuses_json = json.dumps(_initial_progress_stage_statuses(), ensure_ascii=False)
     return f"""<!doctype html>
@@ -130,6 +138,8 @@ def render_studio_home(
     .settings-panel[open] > summary::after {{ content: "-"; }}
     .settings-body {{ border-top: 1px solid #d8dee4; padding: 1rem; }}
     .settings-body h2 {{ margin-top: 0; }}
+    .settings-actions {{ display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 1rem; }}
+    .settings-actions button {{ margin-top: 0; }}
     .progress-panel {{ background: #f8fbff; border: 1px solid #b9ddff; border-radius: 12px; padding: 1rem; margin: 1rem 0; }}
     .progress-panel h2 {{ margin-top: 0; }}
     .progress-graph {{ display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.5rem; margin-top: 1rem; }}
@@ -163,6 +173,9 @@ def render_studio_home(
       pending: "待機中"
     }};
     let runStatusTimer = null;
+    const SETTINGS_STORAGE_KEY = "fukikae.studio.settings.v1";
+    const SAVED_TEXT_FIELDS = ["xai_base_url", "xai_text_model", "source_lang", "target_lang", "voice", "subtitle_output"];
+    const SAVED_CHECKBOX_FIELDS = ["execute_ffmpeg", "overwrite", "clean_output"];
 
     function statusLabel(status) {{
       return STATUS_LABELS[status] || status || "unknown";
@@ -317,6 +330,121 @@ def render_studio_home(
         showAsyncError(error.message || "ローカルパイプラインを開始できませんでした。");
       }}
     }}
+    function pipelineForm() {{
+      return document.getElementById("pipeline-run-form");
+    }}
+    function setSettingsStatus(message) {{
+      const status = document.getElementById("settings-save-status");
+      if (status) {{
+        status.textContent = message;
+      }}
+    }}
+    function setXaiApiKeyStatus(message) {{
+      const status = document.getElementById("xai-api-key-save-status");
+      if (status) {{
+        status.textContent = message;
+      }}
+    }}
+    function loadSavedStudioSettings() {{
+      const form = pipelineForm();
+      if (!form) {{
+        return;
+      }}
+      let saved = null;
+      try {{
+        saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || "null");
+      }} catch (error) {{
+        saved = null;
+      }}
+      if (!saved || typeof saved !== "object") {{
+        return;
+      }}
+      SAVED_TEXT_FIELDS.forEach((name) => {{
+        const field = form.elements[name];
+        if (field && Object.prototype.hasOwnProperty.call(saved, name)) {{
+          field.value = saved[name] || "";
+        }}
+      }});
+      SAVED_CHECKBOX_FIELDS.forEach((name) => {{
+        const field = form.elements[name];
+        if (field && Object.prototype.hasOwnProperty.call(saved, name)) {{
+          field.checked = Boolean(saved[name]);
+        }}
+      }});
+    }}
+    function saveStudioSettings() {{
+      const form = pipelineForm();
+      if (!form) {{
+        return;
+      }}
+      const settings = {{}};
+      SAVED_TEXT_FIELDS.forEach((name) => {{
+        const field = form.elements[name];
+        if (field) {{
+          settings[name] = field.value;
+        }}
+      }});
+      SAVED_CHECKBOX_FIELDS.forEach((name) => {{
+        const field = form.elements[name];
+        if (field) {{
+          settings[name] = Boolean(field.checked);
+        }}
+      }});
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      setSettingsStatus("設定を保存しました。");
+    }}
+    async function refreshXaiApiKeyStatus() {{
+      try {{
+        const response = await fetch({xai_api_key_status_url}, {{ headers: {{ "Accept": "application/json" }} }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "保存状態を確認できませんでした。");
+        }}
+        setXaiApiKeyStatus(payload.saved ? "保存済みAPI Keyがあります。" : "保存済みAPI Keyはありません。");
+      }} catch (error) {{
+        setXaiApiKeyStatus(error.message || "保存状態を確認できませんでした。");
+      }}
+    }}
+    async function saveXaiApiKey() {{
+      const form = pipelineForm();
+      const field = form ? form.elements["xai_api_key"] : null;
+      const apiKey = field ? field.value.trim() : "";
+      if (!apiKey) {{
+        setXaiApiKeyStatus("保存するAPI Keyを入力してください。");
+        return;
+      }}
+      try {{
+        const response = await fetch({xai_api_key_save_url}, {{
+          method: "POST",
+          headers: {{ "Accept": "application/json", "Content-Type": "application/json" }},
+          body: JSON.stringify({{ xai_api_key: apiKey }})
+        }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "API Keyを保存できませんでした。");
+        }}
+        field.value = "";
+        setXaiApiKeyStatus("API KeyをこのMacに保存しました。");
+      }} catch (error) {{
+        setXaiApiKeyStatus(error.message || "API Keyを保存できませんでした。");
+      }}
+    }}
+    async function deleteXaiApiKey() {{
+      try {{
+        const response = await fetch({xai_api_key_delete_url}, {{
+          method: "POST",
+          headers: {{ "Accept": "application/json", "Content-Type": "application/json" }},
+          body: JSON.stringify({{}})
+        }});
+        const payload = await response.json();
+        if (!response.ok) {{
+          throw new Error(payload.error || "保存済みAPI Keyを削除できませんでした。");
+        }}
+        setXaiApiKeyStatus("保存済みAPI Keyを削除しました。");
+      }} catch (error) {{
+        setXaiApiKeyStatus(error.message || "保存済みAPI Keyを削除できませんでした。");
+      }}
+    }}
     function setVideoPickerStatus(message) {{
       const status = document.getElementById("source-video-picker-status");
       if (status) {{
@@ -410,8 +538,10 @@ def render_studio_home(
     window.addEventListener("DOMContentLoaded", () => {{
       const form = document.getElementById("pipeline-run-form");
       if (form) {{
+        loadSavedStudioSettings();
         form.addEventListener("submit", startPipelineRun);
       }}
+      refreshXaiApiKeyStatus();
       renderProgressGraph(INITIAL_STAGE_STATUSES);
     }});
   </script>
@@ -479,6 +609,11 @@ def render_studio_home(
         <p>Live xAIモードでは、ソース動画から音声を抽出し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。</p>
         <label>xAI APIキー</label>
         <input type="password" name="xai_api_key" value="" autocomplete="off">
+        <div class="settings-actions">
+          <button type="button" onclick="saveXaiApiKey()">API KeyをこのMacに保存</button>
+          <button type="button" onclick="deleteXaiApiKey()">保存済みAPI Keyを削除</button>
+        </div>
+        <p id="xai-api-key-save-status" class="field-status" role="status" aria-live="polite"></p>
         <div class="row-2">
           <div>
             <label>xAI Base URL</label>
@@ -489,6 +624,10 @@ def render_studio_home(
             <input type="text" name="xai_text_model" value="{_default(defaults, 'xai_text_model', DEFAULT_XAI_TEXT_MODEL)}">
           </div>
         </div>
+        <div class="settings-actions">
+          <button type="button" onclick="saveStudioSettings()">設定を保存</button>
+        </div>
+        <p id="settings-save-status" class="field-status" role="status" aria-live="polite"></p>
       </div>
     </details>
 
@@ -526,12 +665,15 @@ def run_studio_form(
     form: Mapping[str, object],
     live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
     client_factory: ClientFactory = XAIClient,
+    api_key_loader: Optional[APIKeyLoader] = None,
 ) -> dict:
     project_dir = Path(_required_form_value(form, "project"))
     execute_ffmpeg = _form_bool(form, "execute_ffmpeg")
     subtitle_output = _form_value(form, "subtitle_output", DEFAULT_SUBTITLE_OUTPUT)
+    key_loader = api_key_loader or load_xai_api_key_from_keychain
+    api_key = _form_value(form, "xai_api_key", "").strip() or key_loader().strip()
     config = XAIConfig(
-        api_key=_required_form_value(form, "xai_api_key"),
+        api_key=api_key,
         base_url=_form_value(form, "xai_base_url", DEFAULT_XAI_BASE_URL),
         text_model=_form_value(form, "xai_text_model", DEFAULT_XAI_TEXT_MODEL),
         stt_language=_form_value(form, "source_lang", "auto"),
@@ -561,9 +703,11 @@ class RunJobStore:
         self,
         live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
         client_factory: ClientFactory = XAIClient,
+        api_key_loader: Optional[APIKeyLoader] = None,
     ) -> None:
         self._live_pipeline_runner = live_pipeline_runner
         self._client_factory = client_factory
+        self._api_key_loader = api_key_loader or load_xai_api_key_from_keychain
         self._jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
@@ -603,6 +747,7 @@ class RunJobStore:
                 form,
                 live_pipeline_runner=self._live_pipeline_runner,
                 client_factory=self._client_factory,
+                api_key_loader=self._api_key_loader,
             )
         except Exception as exc:  # pragma: no cover - exercised through server boundary tests
             self._update(
@@ -656,6 +801,74 @@ def choose_project_directory(current_path: Optional[str] = None) -> Optional[Pat
     raise RuntimeError(stderr or "出力先フォルダの選択に失敗しました。")
 
 
+def load_xai_api_key_from_keychain() -> str:
+    if sys.platform != "darwin":
+        return ""
+    completed = subprocess.run(
+        [
+            "security",
+            "find-generic-password",
+            "-a",
+            XAI_KEYCHAIN_ACCOUNT,
+            "-s",
+            XAI_KEYCHAIN_SERVICE,
+            "-w",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def save_xai_api_key_to_keychain(api_key: str) -> None:
+    cleaned = api_key.strip()
+    if not cleaned:
+        raise ValueError("xAI API Keyを入力してください。")
+    if sys.platform != "darwin":
+        raise RuntimeError("API Key保存は現在macOSのローカル実行でのみ利用できます。")
+    completed = subprocess.run(
+        [
+            "security",
+            "add-generic-password",
+            "-a",
+            XAI_KEYCHAIN_ACCOUNT,
+            "-s",
+            XAI_KEYCHAIN_SERVICE,
+            "-w",
+            cleaned,
+            "-U",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "API Keyの保存に失敗しました。")
+
+
+def delete_xai_api_key_from_keychain() -> None:
+    if sys.platform != "darwin":
+        raise RuntimeError("API Key削除は現在macOSのローカル実行でのみ利用できます。")
+    completed = subprocess.run(
+        [
+            "security",
+            "delete-generic-password",
+            "-a",
+            XAI_KEYCHAIN_ACCOUNT,
+            "-s",
+            XAI_KEYCHAIN_SERVICE,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode not in {0, 44}:
+        raise RuntimeError(completed.stderr.strip() or "保存済みAPI Keyの削除に失敗しました。")
+
+
 def _safe_upload_filename(original_filename: str) -> str:
     source_name = Path(original_filename or "source_video.mp4").name
     source_path = Path(source_name)
@@ -681,14 +894,21 @@ def make_studio_handler(
     access_key: str,
     live_pipeline_runner: LivePipelineRunner = run_live_pipeline,
     client_factory: ClientFactory = XAIClient,
+    api_key_loader: Optional[APIKeyLoader] = None,
+    api_key_saver: Optional[APIKeySaver] = None,
+    api_key_deleter: Optional[APIKeyDeleter] = None,
     upload_dir: Optional[Path] = None,
     directory_picker: DirectoryPicker = choose_project_directory,
     job_store: Optional[RunJobStore] = None,
 ):
     source_upload_dir = Path(upload_dir) if upload_dir is not None else Path.cwd() / DEFAULT_UPLOAD_DIR
+    key_loader = api_key_loader or load_xai_api_key_from_keychain
+    key_saver = api_key_saver or save_xai_api_key_to_keychain
+    key_deleter = api_key_deleter or delete_xai_api_key_from_keychain
     jobs = job_store or RunJobStore(
         live_pipeline_runner=live_pipeline_runner,
         client_factory=client_factory,
+        api_key_loader=key_loader,
     )
 
     class StudioHandler(BaseHTTPRequestHandler):
@@ -707,6 +927,12 @@ def make_studio_handler(
                     self._send_json({"error": "実行ジョブが見つかりません。"}, status=404)
                     return
                 self._send_json(snapshot)
+                return
+            if parsed.path == "/xai-api-key-status":
+                if not self._is_authorized(parsed.query):
+                    self._send_json({"error": "Forbidden"}, status=403)
+                    return
+                self._send_json({"saved": bool(key_loader().strip())})
                 return
             if parsed.path != "/" or not self._is_authorized(parsed.query):
                 self._send_text("Forbidden\n", status=403, content_type="text/plain; charset=utf-8")
@@ -735,6 +961,21 @@ def make_studio_handler(
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, status=400)
                 return
+            if parsed.path == "/save-xai-api-key":
+                try:
+                    payload = self._json_body()
+                    key_saver(str(payload.get("xai_api_key", "")))
+                    self._send_json({"saved": True})
+                except Exception as exc:
+                    self._send_json({"error": _friendly_error_message(str(exc))}, status=400)
+                return
+            if parsed.path == "/delete-xai-api-key":
+                try:
+                    key_deleter()
+                    self._send_json({"deleted": True, "saved": False})
+                except Exception as exc:
+                    self._send_json({"error": _friendly_error_message(str(exc))}, status=400)
+                return
             if parsed.path != "/run":
                 self._send_text("Forbidden\n", status=403, content_type="text/plain; charset=utf-8")
                 return
@@ -756,6 +997,7 @@ def make_studio_handler(
                     form,
                     live_pipeline_runner=live_pipeline_runner,
                     client_factory=client_factory,
+                    api_key_loader=key_loader,
                 )
                 self._send_text(
                     render_studio_home(render_defaults, access_key, last_result=result),
@@ -798,16 +1040,20 @@ def make_studio_handler(
             return save_uploaded_source_video(field.file, str(field.filename), upload_dir)
 
         def _project_directory_current_path(self) -> Optional[str]:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0:
-                return None
-            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            payload = self._json_body()
             if not isinstance(payload, Mapping):
                 return None
             current_path = payload.get("current_path")
             if current_path is None:
                 return None
             return str(current_path)
+
+        def _json_body(self) -> Mapping[str, object]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                return {}
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            return payload if isinstance(payload, Mapping) else {}
 
         def _send_json(self, payload: Mapping[str, object], status: int = 200) -> None:
             self._send_text(json.dumps(payload, indent=2) + "\n", status=status, content_type="application/json")

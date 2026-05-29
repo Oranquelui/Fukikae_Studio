@@ -81,6 +81,15 @@ def test_render_studio_home_exposes_live_xai_controls_without_fixture_mode():
     assert "最終レンダー" in html
     assert 'type="password" name="xai_api_key" value=""' in html
     assert "このローカル実行中だけ使用" in html
+    assert "saveStudioSettings" in html
+    assert "fukikae.studio.settings.v1" in html
+    assert "API KeyをこのMacに保存" in html
+    assert "保存済みAPI Keyを削除" in html
+    assert "/xai-api-key-status?key=abc123" in html
+    assert "/save-xai-api-key?key=abc123" in html
+    assert "/delete-xai-api-key?key=abc123" in html
+    assert 'const SAVED_TEXT_FIELDS = ["xai_base_url", "xai_text_model", "source_lang", "target_lang", "voice", "subtitle_output"];' in html
+    assert 'const SAVED_CHECKBOX_FIELDS = ["execute_ffmpeg", "overwrite", "clean_output"];' in html
     assert 'name="execute_ffmpeg"' in html
     assert "同じ出力先を再実行する" in html
     assert 'name="clean_output" checked' in html
@@ -365,6 +374,67 @@ def test_run_endpoint_can_start_async_job_and_report_progress(tmp_path):
         server.server_close()
 
 
+def test_xai_api_key_endpoints_save_status_and_delete_without_echoing_secret():
+    saved_api_key = []
+
+    def fake_loader():
+        return saved_api_key[-1] if saved_api_key else ""
+
+    def fake_saver(api_key):
+        saved_api_key.append(api_key)
+
+    def fake_deleter():
+        saved_api_key.clear()
+
+    handler = make_studio_handler(
+        {},
+        access_key="abc123",
+        api_key_loader=fake_loader,
+        api_key_saver=fake_saver,
+        api_key_deleter=fake_deleter,
+    )
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status_url = f"http://127.0.0.1:{server.server_address[1]}/xai-api-key-status?key=abc123"
+        with urllib.request.urlopen(status_url) as response:
+            initial_payload = json.loads(response.read().decode("utf-8"))
+        assert initial_payload == {"saved": False}
+
+        save_request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/save-xai-api-key?key=abc123",
+            data=json.dumps({"xai_api_key": "unit-test-secret"}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(save_request) as response:
+            save_payload_text = response.read().decode("utf-8")
+        assert json.loads(save_payload_text) == {"saved": True}
+        assert "unit-test-secret" not in save_payload_text
+        assert saved_api_key == ["unit-test-secret"]
+
+        with urllib.request.urlopen(status_url) as response:
+            saved_status_text = response.read().decode("utf-8")
+        assert json.loads(saved_status_text) == {"saved": True}
+        assert "unit-test-secret" not in saved_status_text
+
+        delete_request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/delete-xai-api-key?key=abc123",
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(delete_request) as response:
+            delete_payload = json.loads(response.read().decode("utf-8"))
+        assert delete_payload == {"deleted": True, "saved": False}
+        assert saved_api_key == []
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+
 def test_run_studio_form_uses_live_pipeline_and_returns_stage_statuses(tmp_path):
     calls = []
     configs = []
@@ -437,6 +507,50 @@ def test_run_studio_form_uses_live_pipeline_and_returns_stage_statuses(tmp_path)
         {"stage": "final-mux", "status": "complete"},
         {"stage": "validate", "status": "complete"},
     ]
+
+
+def test_run_studio_form_uses_saved_key_when_api_key_field_is_empty(tmp_path):
+    configs = []
+    source_video = tmp_path / "source.mp4"
+    project_dir = tmp_path / "project"
+
+    class FakeClient:
+        pass
+
+    def fake_client_factory(config):
+        configs.append(config)
+        return FakeClient()
+
+    def fake_live_pipeline(project_dir_arg, **kwargs):
+        return {
+            "validation": {
+                "status": "complete",
+                "missing_required_artifacts": [],
+                "final_output": "output/dubbed.ja.mp4",
+                "final_output_exists": True,
+            }
+        }
+
+    result = run_studio_form(
+        {
+            "video": str(source_video),
+            "project": str(project_dir),
+            "xai_api_key": "",
+            "xai_base_url": "https://api.x.ai/v1",
+            "xai_text_model": "grok-test",
+            "source_lang": "auto",
+            "target_lang": "ja",
+            "voice": "d0cb9ff07d95",
+            "subtitle_output": "both",
+        },
+        live_pipeline_runner=fake_live_pipeline,
+        client_factory=fake_client_factory,
+        api_key_loader=lambda: "saved-unit-test-secret",
+    )
+
+    assert configs[0].api_key == "saved-unit-test-secret"
+    assert result["status"] == "complete"
+    assert "saved-unit-test-secret" not in str(result)
 
 
 def test_run_studio_form_can_keep_only_final_mp4_for_web_output(tmp_path):
