@@ -163,3 +163,7 @@ http://127.0.0.1:8765/?key=...
 - [Provider Policy](docs/PROVIDER_POLICY.md)
 - [xAI Endpoint Notes](docs/XAI_ENDPOINT_NOTES.md)
 - [Public Sample Runbook](docs/PUBLIC_SAMPLE_RUNBOOK.md)
+
+## ライセンス
+
+FukiKae StudioはMIT Licenseで公開しています。個人利用、改変、再配布、商用利用が可能です。詳しくは[LICENSE](LICENSE)を確認してください。

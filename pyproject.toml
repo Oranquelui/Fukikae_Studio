@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "Local-first xAI-only Japanese dubbing CLI MVP."
 readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "MIT"}
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+]
 dependencies = ["Pillow>=10"]
 
 [project.scripts]
