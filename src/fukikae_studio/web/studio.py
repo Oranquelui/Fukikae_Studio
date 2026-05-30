@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from fukikae_studio.ai.xai_client import XAIClient
 from fukikae_studio.ai.xai_tts import BUILTIN_TTS_VOICES
 from fukikae_studio.config import DEFAULT_XAI_BASE_URL, DEFAULT_XAI_TEXT_MODEL, DEFAULT_XAI_TTS_VOICE, XAIConfig
+from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 from fukikae_studio.pipeline.live_run import run_live_pipeline
 from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUBTITLE_OUTPUT_CHOICES
 
@@ -551,7 +552,7 @@ def render_studio_home(
   <h1>FukiKae Studio ローカルWeb Alpha</h1>
   <p><strong>ローカル実行モード</strong> - このマシン上のローカルパスだけを使います。</p>
   <section class="notice">
-    <p>このAlphaは<strong>ローカル限定</strong>で動作し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。</p>
+    <p>このAlphaは<strong>ローカル限定</strong>で動作し、xAI STT・Grok・xAI TTSで吹き替えを生成します。</p>
     <ul>
       <li><strong>外部アップロードなし</strong>: 選択した動画はlocalhostへローカル取り込みされ、このマシン内に残ります。</li>
       <li><strong>Live xAIモード</strong>: Live xAIモードでは、xAI STT・Grok・xAI TTSを使います。APIキーはこのローカル実行中だけ使用し、ページへ再表示しません。</li>
@@ -606,7 +607,7 @@ def render_studio_home(
       <summary>設定</summary>
       <div class="settings-body">
         <h2>Live xAI設定</h2>
-        <p>Live xAIモードでは、ソース動画から音声を抽出し、xAI STT・Grok・xAI TTSで日本語吹き替えを生成します。</p>
+        <p>Live xAIモードでは、ソース動画から音声を抽出し、xAI STT・Grok・xAI TTSで吹き替えを生成します。</p>
         <label>xAI APIキー</label>
         <input type="password" name="xai_api_key" value="" autocomplete="off">
         <div class="settings-actions">
@@ -638,7 +639,9 @@ def render_studio_home(
       </div>
       <div>
         <label>翻訳先言語</label>
-        <input type="text" name="target_lang" value="{_default(defaults, 'target_lang', 'ja')}">
+        <select name="target_lang">
+          {_render_target_language_options(_default(defaults, 'target_lang', 'ja'))}
+        </select>
       </div>
       <div>
         <label>Voice</label>
@@ -670,6 +673,7 @@ def run_studio_form(
     project_dir = Path(_required_form_value(form, "project"))
     execute_ffmpeg = _form_bool(form, "execute_ffmpeg")
     subtitle_output = _form_value(form, "subtitle_output", DEFAULT_SUBTITLE_OUTPUT)
+    target_lang = normalize_target_language(_form_value(form, "target_lang", "ja"))
     key_loader = api_key_loader or load_xai_api_key_from_keychain
     api_key = _form_value(form, "xai_api_key", "").strip() or key_loader().strip()
     config = XAIConfig(
@@ -678,7 +682,7 @@ def run_studio_form(
         text_model=_form_value(form, "xai_text_model", DEFAULT_XAI_TEXT_MODEL),
         stt_language=_form_value(form, "source_lang", "auto"),
         tts_voice=_form_value(form, "voice", DEFAULT_XAI_TTS_VOICE),
-        tts_language=_form_value(form, "target_lang", "ja"),
+        tts_language=target_lang,
     )
     result = live_pipeline_runner(
         project_dir,
@@ -1378,10 +1382,24 @@ def _render_subtitle_output_options(selected_mode: str) -> str:
     )
 
 
+def _render_target_language_options(selected_language: str) -> str:
+    labels = {
+        "ja": "日本語",
+        "en": "英語",
+    }
+    selected = selected_language if selected_language in labels else "ja"
+    return "\n          ".join(
+        f'<option value="{escape(language, quote=True)}"{" selected" if language == selected else ""}>'
+        f"{escape(label)}</option>"
+        for language, label in labels.items()
+    )
+
+
 def _voice_gender_label(value: str) -> str:
     return {
         "female": "女性",
         "male": "男性",
+        "neutral": "中性",
     }.get(value, value)
 
 

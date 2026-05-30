@@ -17,6 +17,7 @@ from fukikae_studio.media.ffmpeg import require_media_tool
 from fukikae_studio.media.metadata import build_project_ffprobe_metadata_command
 from fukikae_studio.pipeline.assemble import assemble_project
 from fukikae_studio.pipeline.adapt_script import write_dubbing_artifacts
+from fukikae_studio.pipeline.language_artifacts import dubbing_segments_path
 from fukikae_studio.pipeline.live_run import run_live_pipeline
 from fukikae_studio.pipeline.local_run import init_project, run_fixture_pipeline, validate_project
 from fukikae_studio.pipeline.stt import write_stt_artifacts
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="sanitized Grok dubbing JSON fixture; live calls are disabled in this phase",
     )
     script_parser.add_argument("--model", default="grok-4.3", help="Grok model name for request artifact metadata")
+    script_parser.add_argument("--target-lang", default="ja", help="target language, default: ja")
     script_parser.set_defaults(func=_make_script)
 
     tts_parser = subparsers.add_parser("tts", help="write local TTS audio files and manifest for a project")
@@ -104,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate_parser = subparsers.add_parser("validate", help="validate local artifacts")
     validate_parser.add_argument("project", type=Path, help="local FukiKae project directory")
+    validate_parser.add_argument("--target-lang", default="ja", help="target language, default: ja")
     validate_parser.add_argument("--overwrite", action="store_true", help="allow validation report to be overwritten")
     validate_parser.set_defaults(func=_validate)
 
@@ -249,17 +252,18 @@ def _make_script(args: argparse.Namespace) -> int:
     )
     write_dubbing_artifacts(
         args.project,
-        request_payload=build_grok_dubbing_payload(source_segments, model=args.model),
+        request_payload=build_grok_dubbing_payload(source_segments, model=args.model, target_lang=args.target_lang),
         raw_response=raw_response,
         dubbing_segments=dubbing_segments,
+        target_lang=args.target_lang,
     )
-    print(args.project / "script" / "japanese_dubbing_segments.json")
+    print(dubbing_segments_path(args.project, args.target_lang))
     return 0
 
 
 def _tts(args: argparse.Namespace) -> int:
-    dubbing_segments_path = args.project / "script" / "japanese_dubbing_segments.json"
-    dubbing_segments = json.loads(dubbing_segments_path.read_text(encoding="utf-8"))
+    segments_path = dubbing_segments_path(args.project, args.language)
+    dubbing_segments = json.loads(segments_path.read_text(encoding="utf-8"))
     fixture_audio = args.fixture_audio.read_bytes()
     synthesize_voice_segments(
         args.project,
@@ -280,7 +284,7 @@ def _assemble(args: argparse.Namespace) -> int:
 
 
 def _validate(args: argparse.Namespace) -> int:
-    report = validate_project(args.project, overwrite=args.overwrite)
+    report = validate_project(args.project, overwrite=args.overwrite, target_lang=args.target_lang)
     print(args.project / "validation" / "local_test_report.json")
     return 0 if report["status"] != "failed" else 1
 

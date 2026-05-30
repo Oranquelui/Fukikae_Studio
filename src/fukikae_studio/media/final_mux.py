@@ -2,6 +2,11 @@ from pathlib import Path
 from typing import Iterable, List, Mapping, Optional, Tuple
 
 from fukikae_studio.media.ffmpeg import assert_inside_project
+from fukikae_studio.pipeline.language_artifacts import (
+    soft_output_artifact,
+    subtitle_artifacts,
+    subtitle_metadata_language,
+)
 
 
 def build_final_mux_command(
@@ -9,6 +14,7 @@ def build_final_mux_command(
     narration_audio: Path,
     subtitles_srt: Path,
     output_mp4: Path,
+    subtitle_language: str = "jpn",
     overwrite: bool = False,
 ) -> List[str]:
     overwrite_flag = "-y" if overwrite else "-n"
@@ -37,7 +43,7 @@ def build_final_mux_command(
         "-c:s",
         "mov_text",
         "-metadata:s:s:0",
-        "language=jpn",
+        f"language={subtitle_language}",
         "-disposition:s:0",
         "default",
         str(output_mp4),
@@ -132,13 +138,14 @@ def build_project_final_mux_command(
     narration_audio: Optional[Path] = None,
     subtitles_srt: Optional[Path] = None,
     output_mp4: Optional[Path] = None,
+    target_lang: object = "ja",
     overwrite: bool = False,
 ) -> List[str]:
     project = Path(project_dir)
     source = source_video or project / "input" / "source.mp4"
     audio = narration_audio or project / "assembly" / "narration_track.wav"
-    subtitles = subtitles_srt or project / "assembly" / "japanese_subtitles.srt"
-    output = output_mp4 or project / "output" / "dubbed.ja.mp4"
+    subtitles = subtitles_srt or project / subtitle_artifacts(target_lang)["srt"]
+    output = output_mp4 or project / soft_output_artifact(target_lang)
     assert_inside_project(project, source)
     assert_inside_project(project, audio)
     assert_inside_project(project, subtitles)
@@ -148,5 +155,6 @@ def build_project_final_mux_command(
         narration_audio=audio,
         subtitles_srt=subtitles,
         output_mp4=output,
+        subtitle_language=subtitle_metadata_language(target_lang),
         overwrite=overwrite,
     )

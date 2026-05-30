@@ -99,6 +99,34 @@ def test_write_subtitle_artifacts_outputs_srt_and_webvtt(tmp_path):
     }
 
 
+def test_write_subtitle_artifacts_outputs_language_specific_english_files(tmp_path):
+    project_dir = tmp_path / "demo"
+    segments = [
+        {
+            "id": "seg_0001",
+            "source_start_ms": 0,
+            "source_end_ms": 2400,
+            "target_text": "Welcome to the demo.",
+        }
+    ]
+
+    write_subtitle_artifacts(project_dir, segments, language="en")
+
+    assembly_dir = project_dir / "assembly"
+    assert (assembly_dir / "english_subtitles.srt").read_text(encoding="utf-8").startswith("1\n")
+    assert not (assembly_dir / "japanese_subtitles.srt").exists()
+    manifest = json.loads((assembly_dir / "subtitle_manifest.json").read_text(encoding="utf-8"))
+    assert manifest == {
+        "schema_version": "0.1",
+        "language": "en",
+        "formats": {
+            "srt": "assembly/english_subtitles.srt",
+            "webvtt": "assembly/english_subtitles.vtt",
+            "ass": "assembly/english_subtitles.ass",
+        },
+    }
+
+
 def test_write_subtitle_artifacts_refuses_overwrite_by_default(tmp_path):
     project_dir = tmp_path / "demo"
     assembly_dir = project_dir / "assembly"

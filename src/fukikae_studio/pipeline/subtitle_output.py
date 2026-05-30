@@ -1,3 +1,5 @@
+from fukikae_studio.pipeline.language_artifacts import burned_output_artifact, soft_output_artifact
+
 DEFAULT_SUBTITLE_OUTPUT = "both"
 SUBTITLE_OUTPUT_CHOICES = ("both", "burned", "soft")
 
@@ -10,8 +12,8 @@ def normalize_subtitle_output(value: object) -> str:
     return mode
 
 
-def final_output_for_subtitle_output(value: object) -> str:
+def final_output_for_subtitle_output(value: object, target_lang: object = "ja") -> str:
     mode = normalize_subtitle_output(value)
     if mode in {"both", "burned"}:
-        return "output/dubbed.ja.burned.mp4"
-    return "output/dubbed.ja.mp4"
+        return burned_output_artifact(target_lang)
+    return soft_output_artifact(target_lang)

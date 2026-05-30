@@ -1,6 +1,24 @@
 # FukiKae Studio
 
-FukiKae Studioは、ローカル動画を日本語吹き替えMP4に変換する、ローカルファーストのオープン開発ツールです。動画ファイルを外部SaaSへ預けず、自分のPC上で音声抽出、STT、翻訳・吹き替え台本生成、TTS、字幕生成、MP4レンダーを実行します。
+FukiKae Studioは、ローカル動画を日本語または英語の吹き替えMP4に変換するツールです。  
+外国語動画から日本語吹き替え、日本語動画から英語吹き替えを作れます。  
+xAI STT、Grok 4.3、xAI TTS、FFmpegを使い、動画処理は自分のPC上で実行します。
+
+![FukiKae Studio 30秒デモ](docs/assets/fukikae-studio-30s-demo.gif)
+
+## 何ができるか
+
+| 入力 | 出力 |
+| --- | --- |
+| 外国語動画 | 日本語吹き替え + 日本語字幕 |
+| 日本語動画 | 英語吹き替え + 英語字幕 |
+
+- 翻訳先言語を`ja` / `en`から選択できます。
+- 字幕は「焼き込み字幕 / ソフト字幕 / 両方」から選べます。
+- 完成後はMP4だけを残す設定にできます。
+- API Keyは画面へ再表示せず、必要な場合だけmacOS Keychainに保存できます。
+
+![FukiKae Studio ローカルWeb UI](docs/assets/studio-local-web-ui.png)
 
 このリポジトリの配布版は、まず内部beta・個人検証向けです。商用SaaSではなく、アプリ自体は無料です。Live xAIモードを使う場合は、ユーザー自身のxAI API Keyが必要で、発生する費用はxAI APIの従量課金です。
 
@@ -10,17 +28,17 @@ FukiKae Studioは、ローカル動画を日本語吹き替えMP4に変換する
 
 FukiKae Studioは次の目的で作っています。
 
-- ローカル動画をできるだけ外に出さずに日本語吹き替えを作る。
+- ローカル動画をできるだけ外に出さずに、日本語または英語の吹き替えを作る。
 - AI SaaSの月額・クレジット制ではなく、ユーザー自身のxAI API使用量だけで検証できるようにする。
 - STT、翻訳、TTS、字幕、最終muxを分解し、どこで失敗したか見えるようにする。
-- Grokで翻訳文の長さを調整し、元動画の発話タイミングに近い日本語吹き替えを作る。
+- Grokで翻訳文の長さを調整し、元動画の発話タイミングに近い吹き替えを作る。
 - 焼き込み字幕とソフト字幕の両方を比較できるようにする。
 
-## できること
+## 主な機能
 
 - ローカルWeb UI alphaを起動して、ブラウザから動画を選択できます。
-- Live xAIモードで、xAI STT、Grok 4.3、xAI TTSを使った日本語吹き替えを生成できます。
-- Sakura female / Japanese、Ren male / JapaneseなどのxAI Voiceを選択できます。
+- Live xAIモードで、xAI STT、Grok 4.3、xAI TTSを使った日本語または英語の吹き替えを生成できます。
+- Sakura female / Japanese、Ren male / Japanese、Eve / Ara / Rex / Sal / LeoなどのxAI Voiceを選択できます。
 - 焼き込み字幕、ソフト字幕、両方の出力を選べます。
 - デフォルトでは完成MP4だけをローカルプロジェクトディレクトリに残します。
 
@@ -116,10 +134,11 @@ http://127.0.0.1:8765/?key=...
 1. `File open`でソース動画を選ぶ。
 2. `Directory open`でプロジェクトディレクトリ（出力先）を選ぶ。
 3. `設定`を開いてxAI API Keyを入力する。必要なら`API KeyをこのMacに保存`でmacOS Keychainへ保存できます。
-4. Voiceを選ぶ。
-5. 字幕出力を選ぶ。
-6. `ローカルFFmpegで最終レンダーを実行`をONにする。
-7. `ローカルパイプラインを実行`を押す。
+4. 元言語と翻訳先言語を選ぶ。日本語動画から英語吹き替えを作る場合は、元言語を`ja`、翻訳先言語を`en`にします。
+5. Voiceを選ぶ。英語吹き替えでは`ara`、`rex`、`sal`、`leo`、`eve`などを選べます。
+6. 字幕出力を選ぶ。
+7. `ローカルFFmpegで最終レンダーを実行`をONにする。
+8. `ローカルパイプラインを実行`を押す。
 
 `File open`で選んだ動画は外部にアップロードされません。localhostの`work/studio-uploads/`へローカルコピーされ、そのコピー先パスがフォームへ入ります。
 `Directory open`はmacOSのフォルダ選択ダイアログを使い、選んだ出力先パスだけをローカルフォームへ入れます。
@@ -134,6 +153,8 @@ http://127.0.0.1:8765/?key=...
 | --- | --- |
 | `dubbed.ja.burned.mp4` | 焼き込み字幕つきMP4 |
 | `dubbed.ja.mp4` | ソフト字幕つきMP4 |
+| `dubbed.en.burned.mp4` | 英語の焼き込み字幕つきMP4 |
+| `dubbed.en.mp4` | 英語のソフト字幕つきMP4 |
 
 中間artifactを確認したい場合は、`完成後はMP4だけを残す`をOFFにしてください。
 
@@ -146,6 +167,10 @@ http://127.0.0.1:8765/?key=...
 | Sakura 女性 / 日本語 | `d0cb9ff07d95` | `ja` |
 | Ren 男性 / 日本語 | `b1a7441b97a1` | `ja` |
 | Eve 女性 / 多言語 | `eve` | `multilingual` |
+| Ara 中性 / 多言語 | `ara` | `multilingual` |
+| Rex 中性 / 多言語 | `rex` | `multilingual` |
+| Sal 中性 / 多言語 | `sal` | `multilingual` |
+| Leo 中性 / 多言語 | `leo` | `multilingual` |
 
 ## 注意
 

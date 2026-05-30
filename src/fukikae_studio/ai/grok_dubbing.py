@@ -1,7 +1,8 @@
 import json
 from typing import Iterable, List, Mapping, Optional, Protocol
 
-from fukikae_studio.ai.prompts import build_dubbing_prompt
+from fukikae_studio.ai.prompts import build_dubbing_prompt, default_dubbing_style
+from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 
 RESPONSES_ENDPOINT = "/responses"
 
@@ -19,9 +20,11 @@ def build_grok_dubbing_payload(
     source_segments: Iterable[Mapping[str, object]],
     model: str = "grok-4.3",
     target_lang: str = "ja",
-    style: str = "natural-japanese-dub",
+    style: Optional[str] = None,
     repair_instruction: str = "",
 ) -> dict:
+    language = normalize_target_language(target_lang)
+    dubbing_style = style or default_dubbing_style(language)
     payload = {
         "model": model,
         "input": [
@@ -31,7 +34,7 @@ def build_grok_dubbing_payload(
             },
             {
                 "role": "user",
-                "content": build_dubbing_prompt(source_segments, target_lang=target_lang, style=style),
+                "content": build_dubbing_prompt(source_segments, target_lang=language, style=dubbing_style),
             },
         ],
     }
@@ -59,9 +62,11 @@ def generate_dubbing_script(
     source_segments: Iterable[Mapping[str, object]],
     model: str = "grok-4.3",
     target_lang: str = "ja",
-    style: str = "natural-japanese-dub",
+    style: Optional[str] = None,
     max_repair_attempts: int = 1,
 ) -> List[dict]:
+    language = normalize_target_language(target_lang)
+    dubbing_style = style or default_dubbing_style(language)
     source_segment_list = list(source_segments)
     expected_segment_ids = [str(item["id"]) for item in source_segment_list]
     last_error: Optional[DubbingScriptError] = None
@@ -69,8 +74,8 @@ def generate_dubbing_script(
         payload = build_grok_dubbing_payload(
             source_segment_list,
             model=model,
-            target_lang=target_lang,
-            style=style,
+            target_lang=language,
+            style=dubbing_style,
             repair_instruction=_repair_instruction(last_error) if attempt > 0 else "",
         )
         response = client.post_json(RESPONSES_ENDPOINT, payload)

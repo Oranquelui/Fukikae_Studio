@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from fukikae_studio.pipeline.language_artifacts import dubbing_segments_path, normalize_target_language
+
 CSV_FIELDS = [
     "id",
     "source_start_ms",
@@ -22,13 +24,15 @@ def write_dubbing_artifacts(
     request_payload: Mapping[str, object],
     raw_response: Mapping[str, object],
     dubbing_segments: Iterable[Mapping[str, object]],
+    target_lang: object = "ja",
 ) -> None:
     script_dir = Path(project_dir) / "script"
     script_dir.mkdir(parents=True, exist_ok=True)
+    target_language = normalize_target_language(target_lang)
     segment_list = [dict(segment) for segment in dubbing_segments]
     _write_json(script_dir / "grok_dubbing_request.json", request_payload)
     _write_json(script_dir / "grok_dubbing_response.json", raw_response)
-    _write_json(script_dir / "japanese_dubbing_segments.json", segment_list)
+    _write_json(dubbing_segments_path(project_dir, target_language), segment_list)
     _write_csv(script_dir / "dubbing_script.csv", segment_list)
 
 

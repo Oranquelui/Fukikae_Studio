@@ -53,6 +53,20 @@ def test_final_mux_command_copies_video_replaces_audio_and_embeds_soft_subtitles
     assert "yt-dlp" not in command
 
 
+def test_final_mux_command_uses_english_subtitle_metadata_when_requested():
+    command = build_final_mux_command(
+        source_video=Path("input/source.mp4"),
+        narration_audio=Path("assembly/narration_track.wav"),
+        subtitles_srt=Path("assembly/english_subtitles.srt"),
+        output_mp4=Path("output/dubbed.en.mp4"),
+        subtitle_language="eng",
+    )
+
+    assert "language=eng" in command
+    assert "language=jpn" not in command
+    assert command[-1] == "output/dubbed.en.mp4"
+
+
 def test_final_mux_command_requires_explicit_overwrite():
     command = build_final_mux_command(
         source_video=Path("input/source.mp4"),
@@ -132,6 +146,16 @@ def test_write_final_mux_plan_outputs_inspectable_command_plan(tmp_path):
     assert written["command"][-1] == str(project_dir / "output" / "dubbed.ja.mp4")
 
 
+def test_write_final_mux_plan_outputs_language_specific_english_paths(tmp_path):
+    project_dir = tmp_path / "demo"
+
+    plan = write_final_mux_plan(project_dir, language="en")
+
+    assert plan["inputs"]["subtitles_srt"] == str(project_dir / "assembly" / "english_subtitles.srt")
+    assert plan["output"] == str(project_dir / "output" / "dubbed.en.mp4")
+    assert "language=eng" in plan["command"]
+
+
 def test_write_final_mux_plan_refuses_overwrite_by_default(tmp_path):
     project_dir = tmp_path / "demo"
     assembly_dir = project_dir / "assembly"
@@ -192,3 +216,54 @@ def test_assemble_project_writes_final_mux_artifacts_from_tts_and_script_inputs(
     assert (assembly_dir / "japanese_subtitles.srt").exists()
     final_plan = json.loads((assembly_dir / "final_mux_plan.json").read_text(encoding="utf-8"))
     assert final_plan["output"] == str(project_dir / "output" / "dubbed.ja.mp4")
+
+
+def test_assemble_project_writes_english_subtitle_and_output_artifacts(tmp_path):
+    project_dir = tmp_path / "demo"
+    tts_dir = project_dir / "tts"
+    script_dir = project_dir / "script"
+    tts_dir.mkdir(parents=True)
+    script_dir.mkdir(parents=True)
+    (tts_dir / "xai_tts_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "language": "en",
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "text": "Welcome.",
+                        "output_audio": "tts/segment_0001.wav",
+                        "duration_ms": 1000,
+                        "target_slot_start_ms": 0,
+                        "target_slot_end_ms": 1200,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (script_dir / "english_dubbing_segments.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "seg_0001",
+                    "source_start_ms": 0,
+                    "source_end_ms": 1200,
+                    "target_text": "Welcome.",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = assemble_project(project_dir)
+
+    assembly_dir = project_dir / "assembly"
+    assert manifest["artifacts"]["subtitles_srt"] == "assembly/english_subtitles.srt"
+    assert (assembly_dir / "english_subtitles.srt").exists()
+    assert not (assembly_dir / "japanese_subtitles.srt").exists()
+    final_plan = json.loads((assembly_dir / "final_mux_plan.json").read_text(encoding="utf-8"))
+    assert final_plan["output"] == str(project_dir / "output" / "dubbed.en.mp4")

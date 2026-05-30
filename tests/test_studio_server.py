@@ -59,10 +59,17 @@ def test_render_studio_home_exposes_live_xai_controls_without_fixture_mode():
     assert '<option value="d0cb9ff07d95" selected>Sakura 女性 / 日本語</option>' in html
     assert '<option value="b1a7441b97a1">Ren 男性 / 日本語</option>' in html
     assert '<option value="eve">Eve 女性 / 多言語</option>' in html
+    assert '<option value="ara">Ara 中性 / 多言語</option>' in html
+    assert '<option value="rex">Rex 中性 / 多言語</option>' in html
+    assert '<option value="sal">Sal 中性 / 多言語</option>' in html
+    assert '<option value="leo">Leo 中性 / 多言語</option>' in html
     assert '<select name="subtitle_output">' in html
     assert '<option value="both" selected>両方</option>' in html
     assert '<option value="burned">焼き込み字幕（共有用）</option>' in html
     assert '<option value="soft">ソフト字幕（編集用）</option>' in html
+    assert '<select name="target_lang">' in html
+    assert '<option value="ja" selected>日本語</option>' in html
+    assert '<option value="en">英語</option>' in html
     assert '<select name="run_mode">' not in html
     assert '<option value="fixture">Fixture betaモード</option>' not in html
     assert 'data-mode-section="fixture"' not in html
@@ -659,6 +666,55 @@ def test_run_studio_form_can_run_live_pipeline_with_ephemeral_xai_key(tmp_path):
     assert result["status"] == "complete"
     assert result["output_mp4"] == str(project_dir / "output" / "dubbed.ja.burned.mp4")
     assert "unit-test-secret" not in str(result)
+
+
+def test_run_studio_form_passes_english_target_language_and_voice(tmp_path):
+    calls = []
+    configs = []
+    source_video = tmp_path / "source.mp4"
+    project_dir = tmp_path / "project"
+
+    class FakeClient:
+        pass
+
+    def fake_client_factory(config):
+        configs.append(config)
+        return FakeClient()
+
+    def fake_live_pipeline(project_dir_arg, **kwargs):
+        calls.append((project_dir_arg, kwargs))
+        return {
+            "validation": {
+                "status": "complete",
+                "missing_required_artifacts": [],
+                "final_output": "output/dubbed.en.burned.mp4",
+                "final_output_exists": True,
+            }
+        }
+
+    result = run_studio_form(
+        {
+            "run_mode": "live",
+            "video": str(source_video),
+            "project": str(project_dir),
+            "source_lang": "ja",
+            "target_lang": "en",
+            "voice": "ara",
+            "subtitle_output": "both",
+            "xai_api_key": "unit-test-secret",
+            "xai_base_url": "https://api.x.ai/v1",
+            "xai_text_model": "grok-4.3",
+            "execute_ffmpeg": "on",
+        },
+        live_pipeline_runner=fake_live_pipeline,
+        client_factory=fake_client_factory,
+    )
+
+    assert configs[0].tts_language == "en"
+    assert calls[0][1]["source_lang"] == "ja"
+    assert calls[0][1]["target_lang"] == "en"
+    assert calls[0][1]["voice"] == "ara"
+    assert result["output_mp4"] == str(project_dir / "output" / "dubbed.en.burned.mp4")
 
 
 def test_build_studio_url_uses_loopback_host_and_access_key():

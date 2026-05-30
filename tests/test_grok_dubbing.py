@@ -47,6 +47,15 @@ def test_prompt_requires_japanese_natural_dub_strict_json_and_preserved_ids():
     assert "seg_0002" in prompt
 
 
+def test_prompt_supports_english_dubbing_for_japanese_source_video():
+    prompt = build_dubbing_prompt(load_segments(), target_lang="en", style="natural-english-dub")
+
+    assert "target_lang=en" in prompt
+    assert "natural English dubbing" in prompt
+    assert "complete English utterance" in prompt
+    assert "dangling Japanese particles" not in prompt
+
+
 def test_prompt_adds_timing_guidance_to_each_source_segment():
     guided = build_timing_guided_segments(
         [

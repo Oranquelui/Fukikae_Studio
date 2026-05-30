@@ -23,6 +23,30 @@ BUILTIN_TTS_VOICES = (
         "language": "multilingual",
         "gender": "female",
     },
+    {
+        "voice_id": "ara",
+        "name": "Ara",
+        "language": "multilingual",
+        "gender": "neutral",
+    },
+    {
+        "voice_id": "rex",
+        "name": "Rex",
+        "language": "multilingual",
+        "gender": "neutral",
+    },
+    {
+        "voice_id": "sal",
+        "name": "Sal",
+        "language": "multilingual",
+        "gender": "neutral",
+    },
+    {
+        "voice_id": "leo",
+        "name": "Leo",
+        "language": "multilingual",
+        "gender": "neutral",
+    },
 )
 
 

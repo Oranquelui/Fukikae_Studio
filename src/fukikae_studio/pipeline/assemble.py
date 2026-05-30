@@ -5,6 +5,12 @@ from typing import Iterable, Mapping, Optional
 from fukikae_studio.media.final_mux import build_project_final_mux_command
 from fukikae_studio.media.subtitles import build_ass, build_srt, build_webvtt
 from fukikae_studio.media.timing import build_audio_mix_plan, build_narration_timeline
+from fukikae_studio.pipeline.language_artifacts import (
+    dubbing_segments_path,
+    normalize_target_language,
+    soft_output_artifact,
+    subtitle_artifacts,
+)
 
 
 def write_timeline_artifacts(project_dir: Path, timeline: Mapping[str, object], overwrite: bool = False) -> None:
@@ -24,9 +30,11 @@ def write_subtitle_artifacts(
 ) -> None:
     assembly_dir = Path(project_dir) / "assembly"
     assembly_dir.mkdir(parents=True, exist_ok=True)
-    srt_path = assembly_dir / "japanese_subtitles.srt"
-    webvtt_path = assembly_dir / "japanese_subtitles.vtt"
-    ass_path = assembly_dir / "japanese_subtitles.ass"
+    target_language = normalize_target_language(language)
+    artifacts = subtitle_artifacts(target_language)
+    srt_path = Path(project_dir) / artifacts["srt"]
+    webvtt_path = Path(project_dir) / artifacts["webvtt"]
+    ass_path = Path(project_dir) / artifacts["ass"]
     manifest_path = assembly_dir / "subtitle_manifest.json"
     _ensure_can_write([srt_path, webvtt_path, ass_path, manifest_path], overwrite=overwrite)
     segment_list = [dict(segment) for segment in segments]
@@ -35,12 +43,8 @@ def write_subtitle_artifacts(
     ass_text = build_ass(segment_list)
     manifest = {
         "schema_version": "0.1",
-        "language": language,
-        "formats": {
-            "srt": "assembly/japanese_subtitles.srt",
-            "webvtt": "assembly/japanese_subtitles.vtt",
-            "ass": "assembly/japanese_subtitles.ass",
-        },
+        "language": target_language,
+        "formats": artifacts,
     }
     _write_text(srt_path, srt_text)
     _write_text(webvtt_path, webvtt_text)
@@ -54,9 +58,11 @@ def write_final_mux_plan(
     narration_audio: Optional[Path] = None,
     subtitles_srt: Optional[Path] = None,
     output_mp4: Optional[Path] = None,
+    language: str = "ja",
     overwrite: bool = False,
 ) -> dict:
     project = Path(project_dir)
+    target_language = normalize_target_language(language)
     assembly_dir = project / "assembly"
     assembly_dir.mkdir(parents=True, exist_ok=True)
     plan_path = assembly_dir / "final_mux_plan.json"
@@ -66,16 +72,18 @@ def write_final_mux_plan(
         narration_audio=narration_audio,
         subtitles_srt=subtitles_srt,
         output_mp4=output_mp4,
+        target_lang=target_language,
         overwrite=overwrite,
     )
-    output = output_mp4 or project / "output" / "dubbed.ja.mp4"
+    subtitle_paths = subtitle_artifacts(target_language)
+    output = output_mp4 or project / soft_output_artifact(target_language)
     plan = {
         "schema_version": "0.1",
         "strategy": "copy_video_replace_audio_soft_subtitles",
         "inputs": {
             "video": str(source_video or project / "input" / "source.mp4"),
             "narration_audio": str(narration_audio or project / "assembly" / "narration_track.wav"),
-            "subtitles_srt": str(subtitles_srt or project / "assembly" / "japanese_subtitles.srt"),
+            "subtitles_srt": str(subtitles_srt or project / subtitle_paths["srt"]),
         },
         "output": str(output),
         "command": command,
@@ -87,9 +95,9 @@ def write_final_mux_plan(
 def assemble_project(project_dir: Path, overwrite: bool = False) -> dict:
     project = Path(project_dir)
     tts_manifest_path = project / "tts" / "xai_tts_manifest.json"
-    dubbing_segments_path = project / "script" / "japanese_dubbing_segments.json"
     tts_manifest = json.loads(tts_manifest_path.read_text(encoding="utf-8"))
-    dubbing_segments = json.loads(dubbing_segments_path.read_text(encoding="utf-8"))
+    target_language = normalize_target_language(tts_manifest.get("language", "ja"))
+    dubbing_segments = json.loads(dubbing_segments_path(project, target_language).read_text(encoding="utf-8"))
 
     timeline = build_narration_timeline(tts_manifest)
     write_timeline_artifacts(project, timeline, overwrite=overwrite)
@@ -97,18 +105,19 @@ def assemble_project(project_dir: Path, overwrite: bool = False) -> dict:
         project,
         dubbing_segments,
         overwrite=overwrite,
-        language=str(tts_manifest.get("language", "ja")),
+        language=target_language,
     )
-    final_plan = write_final_mux_plan(project, overwrite=overwrite)
+    final_plan = write_final_mux_plan(project, language=target_language, overwrite=overwrite)
+    subtitle_paths = subtitle_artifacts(target_language)
 
     manifest = {
         "schema_version": "0.1",
         "artifacts": {
             "narration_timeline": "assembly/narration_timeline.json",
             "mix_plan": "assembly/mix_plan.json",
-            "subtitles_srt": "assembly/japanese_subtitles.srt",
-            "subtitles_webvtt": "assembly/japanese_subtitles.vtt",
-            "subtitles_ass": "assembly/japanese_subtitles.ass",
+            "subtitles_srt": subtitle_paths["srt"],
+            "subtitles_webvtt": subtitle_paths["webvtt"],
+            "subtitles_ass": subtitle_paths["ass"],
             "subtitle_manifest": "assembly/subtitle_manifest.json",
             "final_mux_plan": "assembly/final_mux_plan.json",
         },

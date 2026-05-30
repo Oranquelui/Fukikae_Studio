@@ -14,6 +14,11 @@ from fukikae_studio.media.final_mux import build_burned_subtitle_mux_command, bu
 from fukikae_studio.media.subtitle_overlay import render_subtitle_overlay_images
 from fukikae_studio.pipeline.adapt_script import write_dubbing_artifacts
 from fukikae_studio.pipeline.assemble import assemble_project
+from fukikae_studio.pipeline.language_artifacts import (
+    burned_output_artifact,
+    dubbing_segments_path,
+    normalize_target_language,
+)
 from fukikae_studio.pipeline.local_run import init_project, validate_project
 from fukikae_studio.pipeline.stt import write_stt_artifacts
 from fukikae_studio.pipeline.subtitle_output import (
@@ -54,11 +59,12 @@ def run_live_pipeline(
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
 ) -> dict:
     project = Path(project_dir)
+    target_language = normalize_target_language(target_lang)
     init_manifest = init_project(
         project,
         source_video=source_video,
         source_lang=source_lang,
-        target_lang=target_lang,
+        target_lang=target_language,
         overwrite=overwrite,
     )
 
@@ -80,7 +86,7 @@ def run_live_pipeline(
     normalized_segments = normalize_stt_response(
         raw_stt_response,
         source_lang=source_lang,
-        target_lang=target_lang,
+        target_lang=target_language,
     )
     write_stt_artifacts(
         project,
@@ -93,13 +99,14 @@ def run_live_pipeline(
         client,
         normalized_segments,
         model=text_model,
-        target_lang=target_lang,
+        target_lang=target_language,
     )
     write_dubbing_artifacts(
         project,
-        request_payload=build_grok_dubbing_payload(normalized_segments, model=text_model, target_lang=target_lang),
+        request_payload=build_grok_dubbing_payload(normalized_segments, model=text_model, target_lang=target_language),
         raw_response={"source": "xai-responses", "segments_count": len(dubbing_segments)},
         dubbing_segments=dubbing_segments,
+        target_lang=target_language,
     )
 
     duration_probe = duration_probe_ms or probe_audio_duration_ms
@@ -110,21 +117,28 @@ def run_live_pipeline(
             client,
             text=str(segment["target_text"]),
             voice=voice,
-            language=target_lang,
+            language=target_language,
         ),
         duration_probe_ms=duration_probe,
         voice=voice,
-        language=target_lang,
+        language=target_language,
         output_extension="mp3",
     )
     assembly_manifest = assemble_project(project, overwrite=overwrite)
     output_mode = normalize_subtitle_output(subtitle_output)
     if execute_ffmpeg:
-        _execute_media_render(project, overwrite=overwrite, media_runner=media_runner, subtitle_output=output_mode)
+        _execute_media_render(
+            project,
+            overwrite=overwrite,
+            media_runner=media_runner,
+            subtitle_output=output_mode,
+            target_lang=target_language,
+        )
     validation = validate_project(
         project,
         overwrite=overwrite,
-        final_output_artifact=final_output_for_subtitle_output(output_mode),
+        final_output_artifact=final_output_for_subtitle_output(output_mode, target_lang=target_language),
+        target_lang=target_language,
     )
     return {
         "project": str(project),
@@ -191,7 +205,9 @@ def _execute_media_render(
     media_runner: Optional[MediaRunner],
     video_size_probe: Optional[VideoSizeProbe] = None,
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
+    target_lang: object = "ja",
 ) -> None:
+    target_language = normalize_target_language(target_lang)
     timeline = _load_json(project / "assembly" / "narration_timeline.json")
     (project / "assembly").mkdir(parents=True, exist_ok=True)
     (project / "output").mkdir(parents=True, exist_ok=True)
@@ -202,7 +218,7 @@ def _execute_media_render(
     )
     if output_mode in {"both", "soft"}:
         _run_media_command(
-            build_project_final_mux_command(project, overwrite=overwrite),
+            build_project_final_mux_command(project, target_lang=target_language, overwrite=overwrite),
             media_runner=media_runner,
         )
     if output_mode in {"both", "burned"}:
@@ -210,7 +226,7 @@ def _execute_media_render(
             video_size_probe or probe_video_size
         )(project / "input" / "source.mp4")
         subtitle_overlays = render_subtitle_overlay_images(
-            _load_json(project / "script" / "japanese_dubbing_segments.json"),
+            _load_json(dubbing_segments_path(project, target_language)),
             output_dir=project / "assembly" / "subtitle_overlays",
             video_size=video_size,
             overwrite=overwrite,
@@ -221,7 +237,7 @@ def _execute_media_render(
                 source_video=project / "input" / "source.mp4",
                 narration_audio=project / "assembly" / "narration_track.wav",
                 subtitle_overlays=subtitle_overlays,
-                output_mp4=project / "output" / "dubbed.ja.burned.mp4",
+                output_mp4=project / burned_output_artifact(target_language),
                 duration_ms=video_duration_ms,
                 overwrite=overwrite,
             ),

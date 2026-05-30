@@ -12,6 +12,13 @@ from fukikae_studio.media.final_mux import build_burned_subtitle_mux_command, bu
 from fukikae_studio.media.subtitle_overlay import render_subtitle_overlay_images
 from fukikae_studio.pipeline.adapt_script import write_dubbing_artifacts
 from fukikae_studio.pipeline.assemble import assemble_project
+from fukikae_studio.pipeline.language_artifacts import (
+    burned_output_artifact,
+    dubbing_segments_artifact,
+    dubbing_segments_path,
+    normalize_target_language,
+    subtitle_artifacts,
+)
 from fukikae_studio.pipeline.stt import write_stt_artifacts
 from fukikae_studio.pipeline.subtitle_output import (
     DEFAULT_SUBTITLE_OUTPUT,
@@ -21,6 +28,16 @@ from fukikae_studio.pipeline.subtitle_output import (
 from fukikae_studio.pipeline.synthesize_voice import synthesize_voice_segments
 from fukikae_studio.config import DEFAULT_XAI_TTS_VOICE
 
+BASE_REQUIRED_LOCAL_TEST_ARTIFACTS = (
+    "input/source.mp4",
+    "stt/normalized_segments.json",
+    "tts/xai_tts_manifest.json",
+    "assembly/narration_timeline.json",
+    "assembly/mix_plan.json",
+    "assembly/subtitle_manifest.json",
+    "assembly/final_mux_plan.json",
+    "assembly/assembly_manifest.json",
+)
 REQUIRED_LOCAL_TEST_ARTIFACTS = (
     "input/source.mp4",
     "stt/normalized_segments.json",
@@ -60,10 +77,11 @@ def init_project(
     if source.resolve(strict=False) != destination.resolve(strict=False):
         shutil.copyfile(source, destination)
 
+    target_language = normalize_target_language(target_lang)
     manifest = {
         "schema_version": "0.1",
         "source_lang": source_lang,
-        "target_lang": target_lang,
+        "target_lang": target_language,
         "input": {
             "source_video": "input/source.mp4",
             "original_filename": source.name,
@@ -73,15 +91,21 @@ def init_project(
     return manifest
 
 
-def validate_project(project_dir: Path, overwrite: bool = False, final_output_artifact: str = FINAL_OUTPUT_ARTIFACT) -> dict:
+def validate_project(
+    project_dir: Path,
+    overwrite: bool = False,
+    final_output_artifact: str = FINAL_OUTPUT_ARTIFACT,
+    target_lang: object = "ja",
+) -> dict:
     project = Path(project_dir)
-    missing = [relative for relative in REQUIRED_LOCAL_TEST_ARTIFACTS if not (project / relative).exists()]
+    required_artifacts = _required_local_test_artifacts(target_lang)
+    missing = [relative for relative in required_artifacts if not (project / relative).exists()]
     final_output_exists = (project / final_output_artifact).exists()
     status = "failed" if missing else "complete" if final_output_exists else "ready_for_final_mux"
     report = {
         "schema_version": "0.1",
         "status": status,
-        "required_artifacts": list(REQUIRED_LOCAL_TEST_ARTIFACTS),
+        "required_artifacts": required_artifacts,
         "missing_required_artifacts": missing,
         "final_output": final_output_artifact,
         "final_output_exists": final_output_exists,
@@ -107,11 +131,12 @@ def run_fixture_pipeline(
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
 ) -> dict:
     project = Path(project_dir)
+    target_language = normalize_target_language(target_lang)
     init_manifest = init_project(
         project,
         source_video=source_video,
         source_lang=source_lang,
-        target_lang=target_lang,
+        target_lang=target_language,
         overwrite=overwrite,
     )
 
@@ -119,7 +144,7 @@ def run_fixture_pipeline(
     normalized_segments = normalize_stt_response(
         raw_stt_response,
         source_lang=source_lang,
-        target_lang=target_lang,
+        target_lang=target_language,
     )
     write_stt_artifacts(
         project,
@@ -135,9 +160,10 @@ def run_fixture_pipeline(
     )
     write_dubbing_artifacts(
         project,
-        request_payload=build_grok_dubbing_payload(normalized_segments),
+        request_payload=build_grok_dubbing_payload(normalized_segments, target_lang=target_language),
         raw_response=raw_dubbing_response,
         dubbing_segments=dubbing_segments,
+        target_lang=target_language,
     )
 
     fixture_audio_bytes = Path(fixture_audio).read_bytes()
@@ -147,16 +173,23 @@ def run_fixture_pipeline(
         synthesize_audio=lambda segment: fixture_audio_bytes,
         duration_probe_ms=lambda path, segment: _duration_ms_from_segment(segment),
         voice=voice,
-        language=target_lang,
+        language=target_language,
     )
     assembly_manifest = assemble_project(project, overwrite=overwrite)
     output_mode = normalize_subtitle_output(subtitle_output)
     if execute_ffmpeg:
-        _execute_media_render(project, overwrite=overwrite, media_runner=media_runner, subtitle_output=output_mode)
+        _execute_media_render(
+            project,
+            overwrite=overwrite,
+            media_runner=media_runner,
+            subtitle_output=output_mode,
+            target_lang=target_language,
+        )
     validation = validate_project(
         project,
         overwrite=overwrite,
-        final_output_artifact=final_output_for_subtitle_output(output_mode),
+        final_output_artifact=final_output_for_subtitle_output(output_mode, target_lang=target_language),
+        target_lang=target_language,
     )
     return {
         "project": str(project),
@@ -172,9 +205,11 @@ def _execute_media_render(
     overwrite: bool,
     media_runner: Optional[MediaRunner],
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
+    target_lang: object = "ja",
 ) -> None:
     if media_runner is None:
         require_media_tool("ffmpeg")
+    target_language = normalize_target_language(target_lang)
     timeline = _load_json(project / "assembly" / "narration_timeline.json")
     (project / "assembly").mkdir(parents=True, exist_ok=True)
     (project / "output").mkdir(parents=True, exist_ok=True)
@@ -185,13 +220,13 @@ def _execute_media_render(
     )
     if output_mode in {"both", "soft"}:
         _run_media_command(
-            build_project_final_mux_command(project, overwrite=overwrite),
+            build_project_final_mux_command(project, target_lang=target_language, overwrite=overwrite),
             media_runner=media_runner,
         )
     if output_mode in {"both", "burned"}:
         video_size = (1280, 720) if media_runner is not None else _probe_video_size(project / "input" / "source.mp4")
         subtitle_overlays = render_subtitle_overlay_images(
-            _load_json(project / "script" / "japanese_dubbing_segments.json"),
+            _load_json(dubbing_segments_path(project, target_language)),
             output_dir=project / "assembly" / "subtitle_overlays",
             video_size=video_size,
             overwrite=overwrite,
@@ -202,7 +237,7 @@ def _execute_media_render(
                 source_video=project / "input" / "source.mp4",
                 narration_audio=project / "assembly" / "narration_track.wav",
                 subtitle_overlays=subtitle_overlays,
-                output_mp4=project / "output" / "dubbed.ja.burned.mp4",
+                output_mp4=project / burned_output_artifact(target_language),
                 duration_ms=video_duration_ms,
                 overwrite=overwrite,
             ),
@@ -271,6 +306,19 @@ def _duration_ms_from_segment(segment: Mapping[str, object]) -> int:
 
 def _required_int(value: Any) -> int:
     return int(value)
+
+
+def _required_local_test_artifacts(target_lang: object) -> list[str]:
+    target_language = normalize_target_language(target_lang)
+    subtitles = subtitle_artifacts(target_language)
+    return [
+        *BASE_REQUIRED_LOCAL_TEST_ARTIFACTS[:2],
+        dubbing_segments_artifact(target_language),
+        *BASE_REQUIRED_LOCAL_TEST_ARTIFACTS[2:5],
+        subtitles["srt"],
+        subtitles["webvtt"],
+        *BASE_REQUIRED_LOCAL_TEST_ARTIFACTS[5:],
+    ]
 
 
 def _load_json(path: Path) -> Any:
