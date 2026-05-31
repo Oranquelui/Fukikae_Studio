@@ -56,6 +56,30 @@ def test_prompt_supports_english_dubbing_for_japanese_source_video():
     assert "dangling Japanese particles" not in prompt
 
 
+def test_prompt_requires_faithful_segment_translation_not_news_summary():
+    prompt = build_dubbing_prompt(
+        [
+            {
+                "id": "seg_0001",
+                "source_start_ms": 1200,
+                "source_end_ms": 3600,
+                "speaker": "SPEAKER_00",
+                "source_lang": "ja",
+                "source_text": "この度は大変申し訳ございませんでした。",
+                "target_lang": "en",
+            }
+        ],
+        target_lang="en",
+        style="natural-english-dub",
+    )
+
+    assert "Translate each source_text faithfully" in prompt
+    assert "Do not summarize the clip" in prompt
+    assert "Do not rewrite the segment as news narration" in prompt
+    assert "first person apology" in prompt
+    assert "I am truly sorry for this." in prompt
+
+
 def test_prompt_adds_timing_guidance_to_each_source_segment():
     guided = build_timing_guided_segments(
         [

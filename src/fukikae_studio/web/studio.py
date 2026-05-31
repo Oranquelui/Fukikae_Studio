@@ -1141,6 +1141,10 @@ def _keep_only_final_mp4(project_dir: Path, summary: Mapping[str, Any], overwrit
         if generated_path.resolve(strict=False) == destination.resolve(strict=False):
             continue
         _remove_generated_artifact(project, generated_path)
+    for stale_mp4 in project.glob("dubbed.*.mp4"):
+        if stale_mp4.resolve(strict=False) == destination.resolve(strict=False):
+            continue
+        _remove_generated_artifact(project, stale_mp4)
 
     clean_summary["output_mp4"] = str(destination)
     clean_summary["validation_report"] = ""

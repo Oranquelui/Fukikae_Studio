@@ -23,6 +23,11 @@ Requirements:
 - Use natural {language_name} dubbing style for spoken video narration.
 - preserve segment IDs exactly; do not add, drop, or rename IDs.
 - Preserve speaker intent and source timing.
+- Translate each source_text faithfully at the segment level.
+- Do not summarize the clip. Do not rewrite the segment as news narration, and do not infer facts that are not in
+  that segment's source_text.
+- Do not merge, skip, or replace a segment just because nearby segments provide context.
+- Preserve first/second/third person, apology level, named entities, numbers, negation, uncertainty, and responsibility.
 - Keep target_text concise enough to fit each source segment.
 - Each source segment includes slot_duration_ms, target_max_duration_ms, and timing_pressure.
 - Treat target_max_duration_ms as the speaking-time budget; estimated_duration_ms <= target_max_duration_ms.
@@ -64,6 +69,9 @@ def _language_guidance(target_lang: str) -> str:
   omit filler, avoid literal word-for-word phrasing, prefer compact spoken English, and do not add explanations.
 - Do not leave target_text as an unfinished fragment. Even when shortening, every target_text must read as a
   complete English utterance with no dangling modifier, cut-off clause, or trailing unfinished phrase.
+- If source_text is a first person apology, target_text must remain a first person apology. For example,
+  "この度は大変申し訳ございませんでした。" should be rendered like "I am truly sorry for this.", not as a
+  news summary or role label.
 - Prefer clear narration phrasing over subtitles-only phrasing; keep punctuation natural for spoken English."""
 
 

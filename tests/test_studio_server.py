@@ -602,6 +602,46 @@ def test_run_studio_form_can_keep_only_final_mp4_for_web_output(tmp_path):
     assert sorted(path.name for path in project_dir.iterdir()) == ["dubbed.ja.burned.mp4"]
 
 
+def test_run_studio_form_clean_output_removes_stale_root_dubbed_mp4s(tmp_path):
+    source_video = tmp_path / "source.mp4"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    stale_output = project_dir / "dubbed.ja.burned.mp4"
+    stale_output.write_bytes(b"stale")
+
+    def fake_pipeline(project_dir_arg, **kwargs):
+        final_output = project_dir_arg / "output" / "dubbed.en.mp4"
+        final_output.parent.mkdir(parents=True, exist_ok=True)
+        final_output.write_bytes(b"final en mp4")
+        return {
+            "validation": {
+                "status": "complete",
+                "missing_required_artifacts": [],
+                "final_output": "output/dubbed.en.mp4",
+                "final_output_exists": True,
+            }
+        }
+
+    result = run_studio_form(
+        {
+            "video": str(source_video),
+            "project": str(project_dir),
+            "xai_api_key": "unit-test-secret",
+            "source_lang": "ja",
+            "target_lang": "en",
+            "voice": "ara",
+            "subtitle_output": "soft",
+            "clean_output": "on",
+        },
+        live_pipeline_runner=fake_pipeline,
+        client_factory=lambda config: object(),
+    )
+
+    assert result["output_mp4"] == str(project_dir / "dubbed.en.mp4")
+    assert not stale_output.exists()
+    assert sorted(path.name for path in project_dir.iterdir()) == ["dubbed.en.mp4"]
+
+
 def test_run_studio_form_can_run_live_pipeline_with_ephemeral_xai_key(tmp_path):
     calls = []
     configs = []
