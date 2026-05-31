@@ -223,6 +223,30 @@ def test_parse_grok_response_rejects_unfinished_japanese_fragments():
     assert "unfinished Japanese fragment" in str(exc_info.value)
 
 
+def test_parse_grok_response_rejects_empty_target_text():
+    response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 1200,
+                        "source_text": "ないと説明していました",
+                        "target_text": "",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+
+    with pytest.raises(DubbingScriptError) as exc_info:
+        parse_grok_dubbing_response(response, expected_segment_ids=["seg_0001"])
+
+    assert "empty target_text" in str(exc_info.value)
+
+
 def test_generate_dubbing_script_uses_xai_client_only():
     client = FakeXAIClient(load_response())
 
@@ -341,6 +365,79 @@ def test_generate_dubbing_script_can_run_english_quality_review_before_tts():
     assert result[0]["target_text"] == "I am truly sorry for this."
     assert len(client.calls) == 2
     assert "Review and repair" in client.calls[1]["payload"]["input"][1]["content"]
+
+
+def test_generate_dubbing_script_repairs_empty_review_target_text():
+    source_segments = [
+        {
+            "id": "seg_0001",
+            "source_start_ms": 0,
+            "source_end_ms": 1300,
+            "speaker": "SPEAKER_00",
+            "source_text": "ないと説明していました",
+        }
+    ]
+    first_response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 1300,
+                        "speaker": "SPEAKER_00",
+                        "source_text": "ないと説明していました",
+                        "target_text": "The city said there was no leak.",
+                        "estimated_duration_ms": 1200,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+    empty_review_response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 1300,
+                        "speaker": "SPEAKER_00",
+                        "source_text": "ないと説明していました",
+                        "target_text": "",
+                        "estimated_duration_ms": 0,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+    repaired_review_response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 1300,
+                        "speaker": "SPEAKER_00",
+                        "source_text": "ないと説明していました",
+                        "target_text": "The city said there was no leak.",
+                        "estimated_duration_ms": 1200,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+    client = FakeXAIClient([first_response, empty_review_response, repaired_review_response])
+
+    result = generate_dubbing_script(client, source_segments, target_lang="en", quality_review=True)
+
+    assert result[0]["target_text"] == "The city said there was no leak."
+    assert len(client.calls) == 3
+    assert "empty target_text" in client.calls[2]["payload"]["input"][-1]["content"]
 
 
 def test_write_dubbing_artifacts_outputs_json_and_csv(tmp_path):

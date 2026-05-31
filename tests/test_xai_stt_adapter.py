@@ -109,6 +109,28 @@ def test_normalize_stt_response_supports_word_key_fallback():
     assert segments[0]["source_end_ms"] == 900
 
 
+def test_normalize_stt_response_joins_japanese_word_tokens_without_spaces():
+    segments = normalize_stt_response(
+        {
+            "words": [
+                {"text": "個", "start": 0.0, "end": 0.1, "speaker": 0},
+                {"text": "人", "start": 0.1, "end": 0.2, "speaker": 0},
+                {"text": "情", "start": 0.2, "end": 0.3, "speaker": 0},
+                {"text": "報", "start": 0.3, "end": 0.4, "speaker": 0},
+                {"text": "の", "start": 0.4, "end": 0.5, "speaker": 0},
+                {"text": "流", "start": 0.5, "end": 0.6, "speaker": 0},
+                {"text": "出", "start": 0.6, "end": 0.7, "speaker": 0},
+                {"text": "は", "start": 0.7, "end": 0.8, "speaker": 0},
+                {"text": "ない", "start": 0.8, "end": 1.0, "speaker": 0},
+            ]
+        },
+        source_lang="ja",
+        target_lang="en",
+    )
+
+    assert segments[0]["source_text"] == "個人情報の流出はない"
+
+
 def test_normalize_stt_response_groups_words_by_speech_pause():
     segments = normalize_stt_response(
         {

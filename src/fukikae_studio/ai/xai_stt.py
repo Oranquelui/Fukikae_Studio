@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Protocol, Tuple
 
@@ -107,9 +108,24 @@ def _segment_from_word_group(words: List[object]) -> dict:
     return {
         "start": words[0]["start"],
         "end": words[-1]["end"],
-        "text": " ".join(_word_text(word) for word in words).strip(),
+        "text": _join_word_texts(words),
         "speaker": words[0].get("speaker") if isinstance(words[0], Mapping) else None,
     }
+
+
+def _join_word_texts(words: List[object]) -> str:
+    texts = [_word_text(word) for word in words]
+    texts = [text for text in texts if text]
+    if _looks_like_cjk_word_sequence(texts):
+        return "".join(texts).strip()
+    return " ".join(texts).strip()
+
+
+def _looks_like_cjk_word_sequence(texts: List[str]) -> bool:
+    if not texts:
+        return False
+    cjk_tokens = sum(1 for text in texts if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text))
+    return cjk_tokens > len(texts) / 2
 
 
 def _word_gap_seconds(previous: object, current: object) -> float:

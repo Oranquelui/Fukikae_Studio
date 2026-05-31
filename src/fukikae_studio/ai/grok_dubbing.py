@@ -49,6 +49,7 @@ def build_grok_dubbing_review_payload(
     model: str = "grok-4.3",
     target_lang: str = "ja",
     style: Optional[str] = None,
+    repair_instruction: str = "",
 ) -> dict:
     language = normalize_target_language(target_lang)
     dubbing_style = style or default_dubbing_style(language)
@@ -58,7 +59,7 @@ def build_grok_dubbing_review_payload(
         "source_segments": list(source_segments),
         "candidate_segments": list(candidate_segments),
     }
-    return {
+    payload = {
         "model": model,
         "input": [
             {
@@ -71,6 +72,9 @@ def build_grok_dubbing_review_payload(
             },
         ],
     }
+    if repair_instruction:
+        payload["input"].append({"role": "user", "content": repair_instruction})
+    return payload
 
 
 def parse_grok_dubbing_response(response: Mapping[str, object], expected_segment_ids: Iterable[str]) -> List[dict]:
@@ -125,7 +129,7 @@ def generate_dubbing_script(
                 )
             return dubbing_segments
         except DubbingScriptError as exc:
-            if "unfinished Japanese fragment" not in str(exc) or attempt >= max_repair_attempts:
+            if not _is_repairable_dubbing_error(exc) or attempt >= max_repair_attempts:
                 raise
             last_error = exc
     raise DubbingScriptError("Grok dubbing response repair failed")
@@ -138,20 +142,31 @@ def review_dubbing_script(
     model: str = "grok-4.3",
     target_lang: str = "ja",
     style: Optional[str] = None,
+    max_repair_attempts: int = 1,
 ) -> List[dict]:
     source_segment_list = list(source_segments)
+    candidate_segment_list = list(candidate_segments)
     expected_segment_ids = [str(item["id"]) for item in source_segment_list]
-    payload = build_grok_dubbing_review_payload(
-        source_segment_list,
-        list(candidate_segments),
-        model=model,
-        target_lang=target_lang,
-        style=style,
-    )
-    response = client.post_json(RESPONSES_ENDPOINT, payload)
-    if not isinstance(response, Mapping):
-        raise DubbingScriptError("Grok dubbing review response must be an object")
-    return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
+    last_error: Optional[DubbingScriptError] = None
+    for attempt in range(max_repair_attempts + 1):
+        payload = build_grok_dubbing_review_payload(
+            source_segment_list,
+            candidate_segment_list,
+            model=model,
+            target_lang=target_lang,
+            style=style,
+            repair_instruction=_repair_instruction(last_error) if attempt > 0 else "",
+        )
+        response = client.post_json(RESPONSES_ENDPOINT, payload)
+        if not isinstance(response, Mapping):
+            raise DubbingScriptError("Grok dubbing review response must be an object")
+        try:
+            return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
+        except DubbingScriptError as exc:
+            if not _is_repairable_dubbing_error(exc) or attempt >= max_repair_attempts:
+                raise
+            last_error = exc
+    raise DubbingScriptError("Grok dubbing review repair failed")
 
 
 def _extract_output_text(response: Mapping[str, object]) -> str:
@@ -198,10 +213,17 @@ def _validate_complete_target_text(segments: List[object]) -> None:
         if not isinstance(segment, Mapping):
             continue
         text = str(segment.get("target_text", "")).strip()
+        if not text:
+            raise DubbingScriptError(f"Segment {segment.get('id', '<unknown>')} has empty target_text")
         if any(text.endswith(ending) for ending in dangling_endings):
             raise DubbingScriptError(
                 f"Segment {segment.get('id', '<unknown>')} target_text is an unfinished Japanese fragment"
             )
+
+
+def _is_repairable_dubbing_error(error: DubbingScriptError) -> bool:
+    detail = str(error)
+    return "unfinished Japanese fragment" in detail or "empty target_text" in detail
 
 
 def _repair_instruction(error: Optional[DubbingScriptError]) -> str:
@@ -209,7 +231,7 @@ def _repair_instruction(error: Optional[DubbingScriptError]) -> str:
     return (
         "Repair only the invalid dubbing script. Return the full strict JSON again with the same segment IDs. "
         f"Fix this validation error: {detail}. "
-        "Every target_text must be a complete Japanese utterance and must not end with dangling particles."
+        "Every target_text must be non-empty and complete. Japanese target_text must not end with dangling particles."
     )
 
 
