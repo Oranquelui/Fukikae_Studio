@@ -100,6 +100,7 @@ def run_live_pipeline(
         normalized_segments,
         model=text_model,
         target_lang=target_language,
+        quality_review=target_language == "en",
     )
     write_dubbing_artifacts(
         project,

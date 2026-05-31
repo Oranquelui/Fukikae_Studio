@@ -69,6 +69,11 @@ def _language_guidance(target_lang: str) -> str:
   omit filler, avoid literal word-for-word phrasing, prefer compact spoken English, and do not add explanations.
 - Do not leave target_text as an unfinished fragment. Even when shortening, every target_text must read as a
   complete English utterance with no dangling modifier, cut-off clause, or trailing unfinished phrase.
+- For Japanese news sources, use concise broadcast-news English while preserving the exact source facts.
+- Preserve numbers as clear English numerals when that is more natural: 約11万5千人 -> about 115,000 residents,
+  業務用PC83台 -> 83 work computers.
+- Preserve denials and absence claims exactly: 個人情報の流出はない -> no leak of personal information.
+- Do not replace spoken content with a role label, title card, chyron, speaker name, or location label.
 - If source_text is a first person apology, target_text must remain a first person apology. For example,
   "この度は大変申し訳ございませんでした。" should be rendered like "I am truly sorry for this.", not as a
   news summary or role label.

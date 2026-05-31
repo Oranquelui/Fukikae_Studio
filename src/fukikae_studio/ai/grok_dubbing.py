@@ -43,6 +43,36 @@ def build_grok_dubbing_payload(
     return payload
 
 
+def build_grok_dubbing_review_payload(
+    source_segments: Iterable[Mapping[str, object]],
+    candidate_segments: Iterable[Mapping[str, object]],
+    model: str = "grok-4.3",
+    target_lang: str = "ja",
+    style: Optional[str] = None,
+) -> dict:
+    language = normalize_target_language(target_lang)
+    dubbing_style = style or default_dubbing_style(language)
+    review_input = {
+        "target_lang": language,
+        "style": dubbing_style,
+        "source_segments": list(source_segments),
+        "candidate_segments": list(candidate_segments),
+    }
+    return {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": "You are the xAI-only dubbing translation quality reviewer for FukiKae Studio.",
+            },
+            {
+                "role": "user",
+                "content": _build_review_prompt(review_input),
+            },
+        ],
+    }
+
+
 def parse_grok_dubbing_response(response: Mapping[str, object], expected_segment_ids: Iterable[str]) -> List[dict]:
     output_text = _extract_output_text(response)
     try:
@@ -64,6 +94,7 @@ def generate_dubbing_script(
     target_lang: str = "ja",
     style: Optional[str] = None,
     max_repair_attempts: int = 1,
+    quality_review: bool = False,
 ) -> List[dict]:
     language = normalize_target_language(target_lang)
     dubbing_style = style or default_dubbing_style(language)
@@ -82,12 +113,45 @@ def generate_dubbing_script(
         if not isinstance(response, Mapping):
             raise DubbingScriptError("Grok dubbing response must be an object")
         try:
-            return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
+            dubbing_segments = parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
+            if quality_review:
+                return review_dubbing_script(
+                    client,
+                    source_segment_list,
+                    dubbing_segments,
+                    model=model,
+                    target_lang=language,
+                    style=dubbing_style,
+                )
+            return dubbing_segments
         except DubbingScriptError as exc:
             if "unfinished Japanese fragment" not in str(exc) or attempt >= max_repair_attempts:
                 raise
             last_error = exc
     raise DubbingScriptError("Grok dubbing response repair failed")
+
+
+def review_dubbing_script(
+    client: JSONClient,
+    source_segments: Iterable[Mapping[str, object]],
+    candidate_segments: Iterable[Mapping[str, object]],
+    model: str = "grok-4.3",
+    target_lang: str = "ja",
+    style: Optional[str] = None,
+) -> List[dict]:
+    source_segment_list = list(source_segments)
+    expected_segment_ids = [str(item["id"]) for item in source_segment_list]
+    payload = build_grok_dubbing_review_payload(
+        source_segment_list,
+        list(candidate_segments),
+        model=model,
+        target_lang=target_lang,
+        style=style,
+    )
+    response = client.post_json(RESPONSES_ENDPOINT, payload)
+    if not isinstance(response, Mapping):
+        raise DubbingScriptError("Grok dubbing review response must be an object")
+    return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
 
 
 def _extract_output_text(response: Mapping[str, object]) -> str:
@@ -147,3 +211,30 @@ def _repair_instruction(error: Optional[DubbingScriptError]) -> str:
         f"Fix this validation error: {detail}. "
         "Every target_text must be a complete Japanese utterance and must not end with dangling particles."
     )
+
+
+def _build_review_prompt(review_input: Mapping[str, object]) -> str:
+    target_lang = str(review_input["target_lang"])
+    target_name = "English" if target_lang == "en" else "Japanese"
+    payload_json = json.dumps(review_input, ensure_ascii=False, indent=2)
+    return f"""Review and repair the candidate {target_name} dubbing script.
+
+Rules:
+- Compare every candidate target_text against the matching source segment source_text.
+- Preserve segment IDs exactly; do not add, drop, merge, or rename IDs.
+- Return the full corrected strict JSON with top-level key "segments".
+- Keep timing fields, speaker, and source_text from the candidate unless they are missing.
+- Fix mistranslations, omissions, hallucinated facts, role label substitutions, title-card/chyron substitutions,
+  number errors, dropped negation, and broken responsibility wording.
+- Do not replace spoken content with a role label, title card, chyron, speaker name, or location label.
+- If source_text is a first person apology, target_text must remain a first person apology. For example,
+  "この度は大変申し訳ございませんでした。" should be rendered like "I am truly sorry for this.", not as a
+  role label such as "Matsumoto City Mayor."
+- For Japanese news source text, use concise broadcast-news English while preserving exact facts:
+  約11万5千人 -> about 115,000 residents; 業務用PC83台 -> 83 work computers;
+  個人情報の流出はない -> no leak of personal information.
+- Keep target_text concise enough for spoken dubbing.
+
+Review input:
+{payload_json}
+"""

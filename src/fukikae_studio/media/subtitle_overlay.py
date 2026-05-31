@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -141,6 +142,33 @@ def _wrap_text(draw: object, text: str, font: object, max_width: int) -> List[st
 
 
 def _wrap_paragraph(draw: object, text: str, font: object, max_width: int) -> List[str]:
+    if re.search(r"\s", text):
+        return _wrap_spaced_paragraph(draw, text, font, max_width)
+    return _wrap_unspaced_text(draw, text, font, max_width)
+
+
+def _wrap_spaced_paragraph(draw: object, text: str, font: object, max_width: int) -> List[str]:
+    lines: List[str] = []
+    current = ""
+    for word in text.split():
+        candidate = word if not current else f"{current} {word}"
+        if draw.textlength(candidate, font=font) <= max_width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        if draw.textlength(word, font=font) <= max_width:
+            current = word
+        else:
+            split_word_lines = _wrap_unspaced_text(draw, word, font, max_width)
+            lines.extend(split_word_lines[:-1])
+            current = split_word_lines[-1] if split_word_lines else ""
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _wrap_unspaced_text(draw: object, text: str, font: object, max_width: int) -> List[str]:
     lines: List[str] = []
     current = ""
     for character in text:

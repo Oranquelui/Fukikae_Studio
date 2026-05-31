@@ -3,7 +3,12 @@ from pathlib import Path
 
 from PIL import Image
 
-from fukikae_studio.media.subtitle_overlay import SAGE_GREEN_RGBA, render_subtitle_overlay_images
+from fukikae_studio.media.subtitle_overlay import SAGE_GREEN_RGBA, _wrap_paragraph, render_subtitle_overlay_images
+
+
+class FixedWidthDraw:
+    def textlength(self, text, font):
+        return len(text)
 
 
 def test_render_subtitle_overlay_images_writes_sage_green_pngs_and_manifest(tmp_path):
@@ -108,3 +113,14 @@ def test_render_subtitle_overlay_images_places_portrait_box_over_existing_captio
     assert alpha_bbox is not None
     assert alpha_bbox[1] <= int(1024 * 0.70)
     assert alpha_bbox[3] >= int(1024 * 0.86)
+
+
+def test_english_subtitle_wrapping_keeps_words_intact():
+    lines = _wrap_paragraph(
+        FixedWidthDraw(),
+        "no leak of personal information",
+        font=None,
+        max_width=12,
+    )
+
+    assert lines == ["no leak of", "personal", "information"]

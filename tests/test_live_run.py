@@ -166,6 +166,9 @@ def test_run_live_pipeline_supports_japanese_to_english_dubbing_outputs(tmp_path
     commands = []
 
     class FakeClient:
+        def __init__(self):
+            self.json_calls = []
+
         def post_multipart(self, path, fields, files):
             assert path == "/stt"
             assert fields == {"format": "true", "diarize": "true", "language": "ja"}
@@ -182,11 +185,16 @@ def test_run_live_pipeline_supports_japanese_to_english_dubbing_outputs(tmp_path
             }
 
         def post_json(self, path, payload):
+            self.json_calls.append(payload)
             assert path == "/responses"
             assert payload["model"] == "grok-4.3"
             prompt = payload["input"][1]["content"]
-            assert "target_lang=en" in prompt
-            assert "natural English dubbing" in prompt
+            if len(self.json_calls) == 1:
+                assert "target_lang=en" in prompt
+                assert "natural English dubbing" in prompt
+            else:
+                assert "Review and repair" in prompt
+                assert "Welcome to the demo." in prompt
             return {
                 "output_text": json.dumps(
                     {
@@ -223,10 +231,11 @@ def test_run_live_pipeline_supports_japanese_to_english_dubbing_outputs(tmp_path
         else:
             output_path.write_bytes(b"rendered-media")
 
+    client = FakeClient()
     result = run_live_pipeline(
         project_dir,
         source_video=source_video,
-        client=FakeClient(),
+        client=client,
         text_model="grok-4.3",
         source_lang="ja",
         target_lang="en",
@@ -246,5 +255,6 @@ def test_run_live_pipeline_supports_japanese_to_english_dubbing_outputs(tmp_path
         "target_text"
     ] == "Welcome to the demo."
     assert (project_dir / "assembly" / "english_subtitles.srt").exists()
+    assert len(client.json_calls) == 2
     assert commands[-2][-1] == str(project_dir / "output" / "dubbed.en.mp4")
     assert commands[-1][-1] == str(project_dir / "output" / "dubbed.en.burned.mp4")

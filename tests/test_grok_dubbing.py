@@ -6,6 +6,7 @@ import pytest
 from fukikae_studio.ai.grok_dubbing import (
     DubbingScriptError,
     build_grok_dubbing_payload,
+    build_grok_dubbing_review_payload,
     generate_dubbing_script,
     parse_grok_dubbing_response,
 )
@@ -78,6 +79,39 @@ def test_prompt_requires_faithful_segment_translation_not_news_summary():
     assert "Do not rewrite the segment as news narration" in prompt
     assert "first person apology" in prompt
     assert "I am truly sorry for this." in prompt
+
+
+def test_prompt_requires_english_news_translation_to_preserve_numbers_denials_and_roles():
+    prompt = build_dubbing_prompt(
+        [
+            {
+                "id": "seg_0001",
+                "source_start_ms": 1200,
+                "source_end_ms": 3600,
+                "speaker": "SPEAKER_00",
+                "source_lang": "ja",
+                "source_text": "去年11月時点の全市民およそ11万5千人の個人情報が含まれる業務用PC83台のうち1台が盗まれました。",
+                "target_lang": "en",
+            },
+            {
+                "id": "seg_0002",
+                "source_start_ms": 3600,
+                "source_end_ms": 6200,
+                "speaker": "SPEAKER_00",
+                "source_lang": "ja",
+                "source_text": "4月の時点では個人情報の流出はないと説明していました。",
+                "target_lang": "en",
+            },
+        ],
+        target_lang="en",
+        style="natural-english-dub",
+    )
+
+    assert "broadcast-news English" in prompt
+    assert "about 115,000 residents" in prompt
+    assert "83 work computers" in prompt
+    assert "no leak of personal information" in prompt
+    assert "Do not replace spoken content with a role label" in prompt
 
 
 def test_prompt_adds_timing_guidance_to_each_source_segment():
@@ -220,6 +254,93 @@ def test_generate_dubbing_script_retries_once_for_unfinished_japanese_fragments(
     assert result[0]["target_text"] == "調査当局はメンディッチの出国を確認しました。"
     assert len(client.calls) == 2
     assert "Repair only the invalid dubbing script" in client.calls[1]["payload"]["input"][-1]["content"]
+
+
+def test_build_review_payload_compares_source_and_candidate_segments():
+    source_segments = [
+        {
+            "id": "seg_0001",
+            "source_start_ms": 0,
+            "source_end_ms": 2200,
+            "speaker": "SPEAKER_00",
+            "source_text": "この度は大変申し訳ございませんでした。",
+        }
+    ]
+    candidate_segments = [
+        {
+            "id": "seg_0001",
+            "source_start_ms": 0,
+            "source_end_ms": 2200,
+            "speaker": "SPEAKER_00",
+            "source_text": "この度は大変申し訳ございませんでした。",
+            "target_text": "Matsumoto City Mayor.",
+        }
+    ]
+
+    payload = build_grok_dubbing_review_payload(source_segments, candidate_segments, target_lang="en")
+    prompt = payload["input"][1]["content"]
+
+    assert payload["model"] == "grok-4.3"
+    assert "Review and repair" in prompt
+    assert "Matsumoto City Mayor." in prompt
+    assert "この度は大変申し訳ございませんでした。" in prompt
+    assert "role label" in prompt
+    assert "I am truly sorry for this." in prompt
+
+
+def test_generate_dubbing_script_can_run_english_quality_review_before_tts():
+    source_segments = [
+        {
+            "id": "seg_0001",
+            "source_start_ms": 0,
+            "source_end_ms": 2200,
+            "speaker": "SPEAKER_00",
+            "source_text": "この度は大変申し訳ございませんでした。",
+        }
+    ]
+    first_response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 2200,
+                        "speaker": "SPEAKER_00",
+                        "source_text": "この度は大変申し訳ございませんでした。",
+                        "target_text": "Matsumoto City Mayor.",
+                        "estimated_duration_ms": 1200,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+    reviewed_response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0001",
+                        "source_start_ms": 0,
+                        "source_end_ms": 2200,
+                        "speaker": "SPEAKER_00",
+                        "source_text": "この度は大変申し訳ございませんでした。",
+                        "target_text": "I am truly sorry for this.",
+                        "estimated_duration_ms": 1500,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+    client = FakeXAIClient([first_response, reviewed_response])
+
+    result = generate_dubbing_script(client, source_segments, target_lang="en", quality_review=True)
+
+    assert result[0]["target_text"] == "I am truly sorry for this."
+    assert len(client.calls) == 2
+    assert "Review and repair" in client.calls[1]["payload"]["input"][1]["content"]
 
 
 def test_write_dubbing_artifacts_outputs_json_and_csv(tmp_path):
