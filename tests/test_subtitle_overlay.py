@@ -43,6 +43,38 @@ def test_render_subtitle_overlay_images_writes_sage_green_pngs_and_manifest(tmp_
     assert manifest["overlays"][0]["image"] == str(output_dir / "seg_0001.png")
 
 
+def test_render_subtitle_overlay_images_accepts_custom_style(tmp_path):
+    output_dir = tmp_path / "overlays"
+
+    render_subtitle_overlay_images(
+        [
+            {
+                "id": "seg_0001",
+                "source_start_ms": 760,
+                "source_end_ms": 7550,
+                "target_text": "字幕スタイルを変更できます",
+            }
+        ],
+        output_dir=output_dir,
+        video_size=(640, 360),
+        subtitle_style={
+            "background_color": "#102030",
+            "font_color": "#F4EBDD",
+            "font_size": 58,
+        },
+    )
+
+    manifest = json.loads((output_dir / "subtitle_overlay_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["style"] == {
+        "background_color": "#102030",
+        "font_color": "#F4EBDD",
+        "font_size": 58,
+        "box_rgba": [16, 32, 48, 255],
+        "text_rgba": [244, 235, 221, 255],
+        "margin_bottom_ratio": 0.12,
+    }
+
+
 def test_render_subtitle_overlay_images_places_box_over_existing_lower_subtitle_band(tmp_path):
     output_dir = tmp_path / "overlays"
 

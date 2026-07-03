@@ -3,10 +3,12 @@ import re
 from pathlib import Path
 from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from fukikae_studio.media.subtitle_style import SubtitleStyle, SubtitleStyleInput, normalize_subtitle_style
 from fukikae_studio.media.subtitles import _segment_timing_ms, _target_text
 
-SAGE_GREEN_RGBA = (116, 139, 110, 255)
-TEXT_RGBA = (255, 255, 255, 255)
+_DEFAULT_SUBTITLE_STYLE = normalize_subtitle_style()
+SAGE_GREEN_RGBA = _DEFAULT_SUBTITLE_STYLE.background_rgba()
+TEXT_RGBA = _DEFAULT_SUBTITLE_STYLE.font_rgba()
 SHADOW_RGBA = (0, 0, 0, 160)
 SUBTITLE_BOTTOM_MARGIN_RATIO = 0.12
 SUBTITLE_MIN_BOX_HEIGHT_RATIO = 0.20
@@ -24,8 +26,10 @@ def render_subtitle_overlay_images(
     output_dir: Path,
     video_size: Tuple[int, int],
     overwrite: bool = False,
+    subtitle_style: SubtitleStyleInput = None,
 ) -> List[dict]:
     image_module, image_draw_module, image_font_module = _load_pillow()
+    style = normalize_subtitle_style(subtitle_style)
     width, height = video_size
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -45,6 +49,7 @@ def render_subtitle_overlay_images(
             text=_target_text(segment),
             width=width,
             height=height,
+            subtitle_style=style,
         )
         image.save(image_path)
         overlays.append({"id": segment_id, "image": image_path, "start_ms": start_ms, "end_ms": end_ms})
@@ -53,8 +58,9 @@ def render_subtitle_overlay_images(
         "schema_version": "0.1",
         "video_size": [width, height],
         "style": {
-            "box_rgba": list(SAGE_GREEN_RGBA),
-            "text_rgba": list(TEXT_RGBA),
+            **style.to_manifest(),
+            "box_rgba": list(style.background_rgba()),
+            "text_rgba": list(style.font_rgba()),
             "margin_bottom_ratio": SUBTITLE_BOTTOM_MARGIN_RATIO,
         },
         "overlays": [
@@ -69,12 +75,20 @@ def render_subtitle_overlay_images(
     return overlays
 
 
-def _draw_subtitle_box(draw: object, image_font_module: object, text: str, width: int, height: int) -> None:
+def _draw_subtitle_box(
+    draw: object,
+    image_font_module: object,
+    text: str,
+    width: int,
+    height: int,
+    subtitle_style: SubtitleStyle,
+) -> None:
     max_text_width = int(width * 0.82)
-    base_font_size = max(28, int(height * 0.052))
-    minimum_font_size = max(22, int(height * 0.036))
+    base_font_size = subtitle_style.font_size
+    minimum_font_size = max(16, int(subtitle_style.font_size * 0.72))
     font, lines = _fit_text(image_font_module, draw, text, max_text_width, base_font_size, minimum_font_size)
-    line_spacing = max(4, int(font.size * 0.18))
+    rendered_font_size = int(getattr(font, "size", subtitle_style.font_size))
+    line_spacing = max(4, int(rendered_font_size * 0.18))
     text_block = "\n".join(lines)
     text_bbox = draw.multiline_textbbox((0, 0), text_block, font=font, spacing=line_spacing)
     text_width = text_bbox[2] - text_bbox[0]
@@ -91,7 +105,7 @@ def _draw_subtitle_box(draw: object, image_font_module: object, text: str, width
     draw.rounded_rectangle(
         (x, y, x + box_width, y + box_height),
         radius=radius,
-        fill=SAGE_GREEN_RGBA,
+        fill=subtitle_style.background_rgba(),
     )
     text_x = x + (box_width - text_width) // 2
     text_y = y + (box_height - text_height) // 2 - text_bbox[1]
@@ -107,7 +121,7 @@ def _draw_subtitle_box(draw: object, image_font_module: object, text: str, width
         (text_x, text_y),
         text_block,
         font=font,
-        fill=TEXT_RGBA,
+        fill=subtitle_style.font_rgba(),
         spacing=line_spacing,
         align="center",
     )

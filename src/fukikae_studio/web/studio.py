@@ -17,8 +17,15 @@ from urllib.parse import parse_qs, quote, urlparse
 from fukikae_studio.ai.xai_client import XAIClient
 from fukikae_studio.ai.xai_tts import BUILTIN_TTS_VOICES
 from fukikae_studio.config import DEFAULT_XAI_BASE_URL, DEFAULT_XAI_TEXT_MODEL, DEFAULT_XAI_TTS_VOICE, XAIConfig
+from fukikae_studio.media.subtitle_style import (
+    DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+    DEFAULT_SUBTITLE_FONT_COLOR,
+    DEFAULT_SUBTITLE_FONT_SIZE,
+    normalize_subtitle_style,
+)
 from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 from fukikae_studio.pipeline.live_run import run_live_pipeline
+from fukikae_studio.pipeline.processing_mode import DEFAULT_PROCESSING_MODE, PROCESSING_MODE_CHOICES, normalize_processing_mode
 from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUBTITLE_OUTPUT_CHOICES
 
 LivePipelineRunner = Callable[..., Mapping[str, Any]]
@@ -75,6 +82,10 @@ def default_studio_form_values(repo_root: Optional[Path] = None) -> dict:
         "target_lang": "ja",
         "voice": DEFAULT_XAI_TTS_VOICE,
         "subtitle_output": DEFAULT_SUBTITLE_OUTPUT,
+        "subtitle_background_color": DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+        "subtitle_font_color": DEFAULT_SUBTITLE_FONT_COLOR,
+        "subtitle_font_size": str(DEFAULT_SUBTITLE_FONT_SIZE),
+        "processing_mode": DEFAULT_PROCESSING_MODE,
         "xai_base_url": DEFAULT_XAI_BASE_URL,
         "xai_text_model": DEFAULT_XAI_TEXT_MODEL,
         "clean_output": True,
@@ -128,6 +139,43 @@ def render_studio_home(
     .path-picker {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }}
     .path-picker button {{ margin-top: 0; white-space: nowrap; }}
     .field-status {{ min-height: 1.4em; margin: 0.35rem 0 0; color: #475569; }}
+    :root {{ color-scheme: light; --app-bg: #f5f5f7; --panel: #ffffff; --panel-soft: #fbfbfd; --text: #1d1d1f; --muted: #6e6e73; --line: #d8d8df; --line-strong: #c4c7cf; --accent: #007aff; --accent-strong: #005ecb; --success: #248a3d; --warning: #b26a00; --danger: #d70015; --shadow: 0 18px 45px rgba(28, 31, 38, 0.08); }}
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", sans-serif; margin: 0; line-height: 1.45; color: var(--text); background: linear-gradient(180deg, #f5f5f7 0%, #ffffff 48%, #f2f4f8 100%); }}
+    .app-shell {{ width: min(1120px, calc(100vw - 48px)); margin: 0 auto; padding: 32px 0 56px; }}
+    .app-header {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.5rem; align-items: start; padding: 1.35rem 1.45rem; margin-bottom: 1rem; border: 1px solid rgba(216, 216, 223, 0.84); border-radius: 18px; background: rgba(255, 255, 255, 0.82); box-shadow: var(--shadow); backdrop-filter: blur(18px); }}
+    .window-dots {{ display: flex; gap: 0.46rem; align-items: center; margin-bottom: 1rem; }}
+    .window-dots span {{ width: 0.72rem; height: 0.72rem; border-radius: 999px; border: 1px solid rgba(0, 0, 0, 0.09); }}
+    .window-dots span:nth-child(1) {{ background: #ff5f57; }}
+    .window-dots span:nth-child(2) {{ background: #febc2e; }}
+    .window-dots span:nth-child(3) {{ background: #28c840; }}
+    .eyebrow {{ margin: 0 0 0.3rem; color: var(--muted); font-size: 0.78rem; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }}
+    h1 {{ margin: 0; font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.02; letter-spacing: 0; }}
+    h2 {{ margin: 0; font-size: 1.08rem; letter-spacing: 0; }}
+    .header-copy {{ max-width: 50rem; margin: 0.7rem 0 0; color: #3f3f46; font-size: 1rem; }}
+    .header-badge {{ display: inline-flex; align-items: center; justify-content: center; min-height: 2.1rem; padding: 0 0.85rem; border: 1px solid var(--line); border-radius: 999px; background: #f8f8fa; color: #3f3f46; font-weight: 700; white-space: nowrap; }}
+    .notice, .result, .error, .progress-panel, .studio-form, .settings-panel {{ background: #ffffff; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 28px rgba(28, 31, 38, 0.06); }}
+    .notice, .result, .error, .progress-panel {{ padding: 1.1rem 1.2rem; margin: 1rem 0; }}
+    .notice {{ background: rgba(255, 255, 255, 0.74); }}
+    .local-note {{ color: var(--muted); margin: 0.35rem 0 0; }}
+    .status-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.85rem; }}
+    .status-item {{ display: grid; gap: 0.25rem; min-height: 4.25rem; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }}
+    .status-label {{ color: var(--muted); font-size: 0.82rem; font-weight: 700; }}
+    .status-value {{ font-weight: 700; overflow-wrap: anywhere; }}
+    .studio-form {{ display: grid; gap: 1rem; padding: 1rem; margin-top: 1rem; }}
+    .form-section {{ display: grid; gap: 1rem; padding: 1rem; border: 1px solid #e7e7ed; border-radius: 14px; background: #ffffff; }}
+    .section-heading {{ display: flex; justify-content: space-between; gap: 1rem; align-items: end; border-bottom: 1px solid #ececf1; padding-bottom: 0.75rem; }}
+    .section-kicker {{ margin: 0 0 0.2rem; color: var(--accent); font-size: 0.78rem; font-weight: 800; }}
+    .section-hint {{ margin: 0; color: var(--muted); font-size: 0.9rem; }}
+    label {{ display: block; margin-bottom: 0.38rem; color: #2f3137; font-weight: 700; }}
+    input[type="text"], input[type="password"], input[type="number"], select {{ width: 100%; min-height: 2.75rem; padding: 0.58rem 0.72rem; border: 1px solid var(--line-strong); border-radius: 10px; background: #fbfbfd; color: var(--text); font-size: 0.98rem; box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.03); }}
+    input[type="color"] {{ width: 100%; min-height: 2.75rem; padding: 0.25rem; border: 1px solid var(--line-strong); border-radius: 10px; background: #fbfbfd; }}
+    input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, input[type="color"]:focus, select:focus {{ outline: 3px solid rgba(0, 122, 255, 0.18); border-color: var(--accent); background: #ffffff; }}
+    .row {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }}
+    .row-2 {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }}
+    .path-picker {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; }}
+    .path-picker button, .settings-actions button {{ min-height: 2.75rem; margin-top: 0; white-space: nowrap; }}
+    .field-status {{ min-height: 1.35em; margin: 0.2rem 0 0; color: var(--muted); font-size: 0.9rem; }}
     .visually-hidden {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }}
     .notice, .result, .error {{ border-radius: 12px; padding: 1rem; margin: 1rem 0; }}
     .notice {{ background: #eef6ff; border: 1px solid #b9ddff; }}
@@ -175,7 +223,7 @@ def render_studio_home(
     }};
     let runStatusTimer = null;
     const SETTINGS_STORAGE_KEY = "fukikae.studio.settings.v1";
-    const SAVED_TEXT_FIELDS = ["xai_base_url", "xai_text_model", "source_lang", "target_lang", "voice", "subtitle_output"];
+    const SAVED_TEXT_FIELDS = ["xai_base_url", "xai_text_model", "source_lang", "target_lang", "voice", "subtitle_output", "processing_mode", "subtitle_background_color", "subtitle_font_color", "subtitle_font_size"];
     const SAVED_CHECKBOX_FIELDS = ["execute_ffmpeg", "overwrite", "clean_output"];
 
     function statusLabel(status) {{
@@ -579,15 +627,6 @@ def render_studio_home(
 
   <form id="pipeline-run-form" method="post" action="{escape(action)}">
     <input type="hidden" name="run_mode" value="live">
-    <div class="row-2">
-      <div>
-        <label>字幕出力</label>
-        <select name="subtitle_output">
-          {_render_subtitle_output_options(_default(defaults, 'subtitle_output', DEFAULT_SUBTITLE_OUTPUT))}
-        </select>
-      </div>
-    </div>
-
     <label for="source-video-path">ソース動画パス（ローカルファイル）</label>
     <div class="path-picker">
       <input id="source-video-path" type="text" name="video" required value="{_default(defaults, 'video')}">
@@ -651,10 +690,52 @@ def render_studio_home(
       </div>
     </div>
 
-    <label><input type="checkbox" name="execute_ffmpeg"{_checked(defaults, 'execute_ffmpeg')}> ローカルFFmpegで最終レンダーを実行</label>
-    <label><input type="checkbox" name="overwrite"{_checked(defaults, 'overwrite')}> 同じ出力先を再実行する（既存ファイルを上書き）</label>
-    <label><input type="checkbox" name="clean_output"{_checked(defaults, 'clean_output', default=True)}> 完成後はMP4だけを残す</label>
-    <button type="submit">ローカルパイプラインを実行</button>
+    <section class="form-section" data-step="output">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Output</p>
+          <h2>字幕とレンダー</h2>
+        </div>
+        <p class="section-hint">MP4出力</p>
+      </div>
+      <div class="row-2">
+        <div>
+          <label>生成モード</label>
+          <select name="processing_mode">
+            {_render_processing_mode_options(_default(defaults, 'processing_mode', DEFAULT_PROCESSING_MODE))}
+          </select>
+        </div>
+        <div>
+          <label>字幕出力</label>
+          <select name="subtitle_output">
+            {_render_subtitle_output_options(_default(defaults, 'subtitle_output', DEFAULT_SUBTITLE_OUTPUT))}
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>字幕背景色</label>
+          <input type="color" name="subtitle_background_color" value="{_default(defaults, 'subtitle_background_color', DEFAULT_SUBTITLE_BACKGROUND_COLOR)}">
+        </div>
+        <div>
+          <label>字幕文字色</label>
+          <input type="color" name="subtitle_font_color" value="{_default(defaults, 'subtitle_font_color', DEFAULT_SUBTITLE_FONT_COLOR)}">
+        </div>
+        <div>
+          <label>字幕サイズ</label>
+          <input type="number" name="subtitle_font_size" value="{_default(defaults, 'subtitle_font_size', str(DEFAULT_SUBTITLE_FONT_SIZE))}" min="18" max="96" step="1">
+        </div>
+      </div>
+      <div class="option-stack">
+        <label class="checkbox-row"><input type="checkbox" name="execute_ffmpeg"{_checked(defaults, 'execute_ffmpeg')}> ローカルFFmpegで最終レンダーを実行</label>
+        <label class="checkbox-row"><input type="checkbox" name="overwrite"{_checked(defaults, 'overwrite')}> 同じ出力先を再実行する（既存ファイルを上書き）</label>
+        <label class="checkbox-row"><input type="checkbox" name="clean_output"{_checked(defaults, 'clean_output', default=True)}> 完成後はMP4だけを残す</label>
+      </div>
+      <div class="run-footer">
+        <p>出力は選択したプロジェクトディレクトリに保存されます。</p>
+        <button class="primary-action" type="submit">ローカルパイプラインを実行</button>
+      </div>
+    </section>
   </form>
 
   {result_html}
@@ -673,6 +754,8 @@ def run_studio_form(
     project_dir = Path(_required_form_value(form, "project"))
     execute_ffmpeg = _form_bool(form, "execute_ffmpeg")
     subtitle_output = _form_value(form, "subtitle_output", DEFAULT_SUBTITLE_OUTPUT)
+    subtitle_style = _subtitle_style_from_form(form)
+    processing_mode = normalize_processing_mode(_form_value(form, "processing_mode", DEFAULT_PROCESSING_MODE))
     target_lang = normalize_target_language(_form_value(form, "target_lang", "ja"))
     key_loader = api_key_loader or load_xai_api_key_from_keychain
     api_key = _form_value(form, "xai_api_key", "").strip() or key_loader().strip()
@@ -684,18 +767,21 @@ def run_studio_form(
         tts_voice=_form_value(form, "voice", DEFAULT_XAI_TTS_VOICE),
         tts_language=target_lang,
     )
-    result = live_pipeline_runner(
-        project_dir,
-        source_video=Path(_required_form_value(form, "video")),
-        client=client_factory(config),
-        text_model=config.text_model,
-        source_lang=config.stt_language,
-        target_lang=config.tts_language,
-        voice=config.tts_voice,
-        overwrite=_form_bool(form, "overwrite"),
-        execute_ffmpeg=execute_ffmpeg,
-        subtitle_output=subtitle_output,
-    )
+    pipeline_kwargs = {
+        "source_video": Path(_required_form_value(form, "video")),
+        "client": client_factory(config),
+        "text_model": config.text_model,
+        "source_lang": config.stt_language,
+        "target_lang": config.tts_language,
+        "voice": config.tts_voice,
+        "overwrite": _form_bool(form, "overwrite"),
+        "execute_ffmpeg": execute_ffmpeg,
+        "subtitle_output": subtitle_output,
+        "processing_mode": processing_mode,
+    }
+    if subtitle_style is not None:
+        pipeline_kwargs["subtitle_style"] = subtitle_style
+    result = live_pipeline_runner(project_dir, **pipeline_kwargs)
     summary = _build_run_summary(project_dir, result, execute_ffmpeg=execute_ffmpeg)
     if _form_bool(form, "clean_output"):
         summary = _keep_only_final_mp4(project_dir, summary, overwrite=_form_bool(form, "overwrite"))
@@ -1141,10 +1227,11 @@ def _keep_only_final_mp4(project_dir: Path, summary: Mapping[str, Any], overwrit
         if generated_path.resolve(strict=False) == destination.resolve(strict=False):
             continue
         _remove_generated_artifact(project, generated_path)
-    for stale_mp4 in project.glob("dubbed.*.mp4"):
-        if stale_mp4.resolve(strict=False) == destination.resolve(strict=False):
-            continue
-        _remove_generated_artifact(project, stale_mp4)
+    for pattern in ("dubbed.*.mp4", "subtitled.*.mp4"):
+        for stale_mp4 in project.glob(pattern):
+            if stale_mp4.resolve(strict=False) == destination.resolve(strict=False):
+                continue
+            _remove_generated_artifact(project, stale_mp4)
 
     clean_summary["output_mp4"] = str(destination)
     clean_summary["validation_report"] = ""
@@ -1326,6 +1413,7 @@ def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping
     merged = dict(defaults)
     for key in (
         "subtitle_output",
+        "processing_mode",
         "video",
         "project",
         "source_lang",
@@ -1333,6 +1421,9 @@ def _merge_submitted_form_defaults(defaults: Mapping[str, object], form: Mapping
         "voice",
         "xai_base_url",
         "xai_text_model",
+        "subtitle_background_color",
+        "subtitle_font_color",
+        "subtitle_font_size",
     ):
         if key in form:
             merged[key] = str(form[key])
@@ -1386,6 +1477,19 @@ def _render_subtitle_output_options(selected_mode: str) -> str:
     )
 
 
+def _render_processing_mode_options(selected_mode: str) -> str:
+    labels = {
+        "dubbing": "吹き替え + 字幕",
+        "subtitles": "字幕のみ（元音声を保持）",
+    }
+    selected = selected_mode if selected_mode in PROCESSING_MODE_CHOICES else DEFAULT_PROCESSING_MODE
+    return "\n          ".join(
+        f'<option value="{escape(mode, quote=True)}"{" selected" if mode == selected else ""}>'
+        f"{escape(labels[mode])}</option>"
+        for mode in PROCESSING_MODE_CHOICES
+    )
+
+
 def _render_target_language_options(selected_language: str) -> str:
     labels = {
         "ja": "日本語",
@@ -1419,6 +1523,24 @@ def _required_form_value(form: Mapping[str, object], key: str) -> str:
     if not value:
         raise ValueError(f"Missing required form field: {key}")
     return value
+
+
+def _subtitle_style_from_form(form: Mapping[str, object]) -> Optional[dict]:
+    keys = ("subtitle_background_color", "subtitle_font_color", "subtitle_font_size")
+    if not any(str(form.get(key, "")).strip() for key in keys):
+        return None
+    style = normalize_subtitle_style(
+        {
+            "background_color": _form_value(
+                form,
+                "subtitle_background_color",
+                DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+            ),
+            "font_color": _form_value(form, "subtitle_font_color", DEFAULT_SUBTITLE_FONT_COLOR),
+            "font_size": _form_value(form, "subtitle_font_size", str(DEFAULT_SUBTITLE_FONT_SIZE)),
+        }
+    )
+    return style.to_manifest()
 
 
 def _form_value(form: Mapping[str, object], key: str, default: str) -> str:

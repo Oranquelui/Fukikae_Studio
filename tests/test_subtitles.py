@@ -56,11 +56,24 @@ def test_build_ass_uses_sage_green_box_above_existing_lower_subtitles():
 
     assert "[V4+ Styles]" in ass
     assert "Style: FukiKaeBox" in ass
-    assert "&H40748B6E" in ass
+    assert "&H406E8B74" in ass
     assert "MarginV" in ass
     assert "220" in ass
     assert "こんにちは、デモへようこそ。" in ass
     assert "Dialogue:" in ass
+
+
+def test_build_ass_accepts_custom_subtitle_style():
+    ass = build_ass(
+        japanese_segments(),
+        subtitle_style={
+            "background_color": "#102030",
+            "font_color": "#F4EBDD",
+            "font_size": 58,
+        },
+    )
+
+    assert "Style: FukiKaeBox,Hiragino Sans,58,&H00DDEBF4,&H00DDEBF4,&H00000000,&H40302010" in ass
 
 
 def test_subtitles_prefer_dub_timing_when_present():
@@ -81,7 +94,15 @@ def test_subtitles_prefer_dub_timing_when_present():
 def test_write_subtitle_artifacts_outputs_srt_and_webvtt(tmp_path):
     project_dir = tmp_path / "demo"
 
-    write_subtitle_artifacts(project_dir, japanese_segments())
+    write_subtitle_artifacts(
+        project_dir,
+        japanese_segments(),
+        subtitle_style={
+            "background_color": "#123456",
+            "font_color": "#ABCDEF",
+            "font_size": 52,
+        },
+    )
 
     assembly_dir = project_dir / "assembly"
     assert (assembly_dir / "japanese_subtitles.srt").read_text(encoding="utf-8").startswith("1\n")
@@ -91,6 +112,11 @@ def test_write_subtitle_artifacts_outputs_srt_and_webvtt(tmp_path):
     assert manifest == {
         "schema_version": "0.1",
         "language": "ja",
+        "style": {
+            "background_color": "#123456",
+            "font_color": "#ABCDEF",
+            "font_size": 52,
+        },
         "formats": {
             "srt": "assembly/japanese_subtitles.srt",
             "webvtt": "assembly/japanese_subtitles.vtt",
@@ -119,6 +145,11 @@ def test_write_subtitle_artifacts_outputs_language_specific_english_files(tmp_pa
     assert manifest == {
         "schema_version": "0.1",
         "language": "en",
+        "style": {
+            "background_color": "#748B6E",
+            "font_color": "#FFFFFF",
+            "font_size": 44,
+        },
         "formats": {
             "srt": "assembly/english_subtitles.srt",
             "webvtt": "assembly/english_subtitles.vtt",

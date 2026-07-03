@@ -1,5 +1,6 @@
 import pytest
 
+from fukikae_studio.pipeline import language_artifacts
 from fukikae_studio.pipeline.language_artifacts import (
     burned_output_artifact,
     dubbing_segments_artifact,
@@ -38,6 +39,19 @@ def test_final_output_for_subtitle_output_is_language_specific():
     assert final_output_for_subtitle_output("both", target_lang="en") == "output/dubbed.en.burned.mp4"
     assert final_output_for_subtitle_output("burned", target_lang="en") == "output/dubbed.en.burned.mp4"
     assert final_output_for_subtitle_output("soft", target_lang="en") == "output/dubbed.en.mp4"
+
+
+def test_subtitle_only_outputs_are_language_specific_and_do_not_use_dubbed_prefix():
+    assert language_artifacts.subtitle_only_soft_output_artifact("ja") == "output/subtitled.ja.mp4"
+    assert language_artifacts.subtitle_only_burned_output_artifact("ja") == "output/subtitled.ja.burned.mp4"
+    assert language_artifacts.subtitle_only_soft_output_artifact("en") == "output/subtitled.en.mp4"
+    assert language_artifacts.subtitle_only_burned_output_artifact("en") == "output/subtitled.en.burned.mp4"
+    assert final_output_for_subtitle_output("both", target_lang="en", processing_mode="subtitles") == (
+        "output/subtitled.en.burned.mp4"
+    )
+    assert final_output_for_subtitle_output("soft", target_lang="ja", processing_mode="subtitles") == (
+        "output/subtitled.ja.mp4"
+    )
 
 
 def test_normalize_target_language_rejects_unsupported_values():

@@ -43,6 +43,9 @@ def test_run_live_help_displays_env_file_option():
     assert result.returncode == 0, result.stderr
     assert "--env-file" in result.stdout
     assert "--execute-ffmpeg" in result.stdout
+    assert "--subtitle-background-color" in result.stdout
+    assert "--subtitle-font-color" in result.stdout
+    assert "--subtitle-font-size" in result.stdout
     assert "live xAI" in result.stdout
 
 

@@ -15,11 +15,17 @@ from fukikae_studio.config import DEFAULT_XAI_TTS_VOICE, XAIConfig, load_env_fil
 from fukikae_studio.media.extract_audio import build_project_audio_extraction_command
 from fukikae_studio.media.ffmpeg import require_media_tool
 from fukikae_studio.media.metadata import build_project_ffprobe_metadata_command
+from fukikae_studio.media.subtitle_style import (
+    DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+    DEFAULT_SUBTITLE_FONT_COLOR,
+    DEFAULT_SUBTITLE_FONT_SIZE,
+)
 from fukikae_studio.pipeline.assemble import assemble_project
 from fukikae_studio.pipeline.adapt_script import write_dubbing_artifacts
 from fukikae_studio.pipeline.language_artifacts import dubbing_segments_path
 from fukikae_studio.pipeline.live_run import run_live_pipeline
 from fukikae_studio.pipeline.local_run import init_project, run_fixture_pipeline, validate_project
+from fukikae_studio.pipeline.processing_mode import DEFAULT_PROCESSING_MODE, PROCESSING_MODE_CHOICES
 from fukikae_studio.pipeline.stt import write_stt_artifacts
 from fukikae_studio.pipeline.subtitle_output import DEFAULT_SUBTITLE_OUTPUT, SUBTITLE_OUTPUT_CHOICES
 from fukikae_studio.pipeline.synthesize_voice import synthesize_voice_segments
@@ -102,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     assemble_parser.add_argument("project", type=Path, help="local FukiKae project directory")
     assemble_parser.add_argument("--overwrite", action="store_true", help="allow assembly artifacts to be overwritten")
+    _add_subtitle_style_arguments(assemble_parser)
     assemble_parser.set_defaults(func=_assemble)
 
     validate_parser = subparsers.add_parser("validate", help="validate local artifacts")
@@ -149,6 +156,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SUBTITLE_OUTPUT,
         help="subtitle output to render when executing ffmpeg, default: both",
     )
+    run_parser.add_argument(
+        "--processing-mode",
+        choices=PROCESSING_MODE_CHOICES,
+        default=DEFAULT_PROCESSING_MODE,
+        help="processing mode, default: dubbing; use subtitles to keep original audio and skip TTS",
+    )
+    _add_subtitle_style_arguments(run_parser)
     run_parser.add_argument("--overwrite", action="store_true", help="allow local run artifacts to be overwritten")
     run_parser.set_defaults(func=_run)
 
@@ -178,6 +192,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SUBTITLE_OUTPUT,
         help="subtitle output to render when executing ffmpeg, default: both",
     )
+    live_parser.add_argument(
+        "--processing-mode",
+        choices=PROCESSING_MODE_CHOICES,
+        default=DEFAULT_PROCESSING_MODE,
+        help="processing mode, default: dubbing; use subtitles to keep original audio and skip TTS",
+    )
+    _add_subtitle_style_arguments(live_parser)
     live_parser.add_argument("--overwrite", action="store_true", help="allow live run artifacts to be overwritten")
     live_parser.set_defaults(func=_run_live)
 
@@ -203,6 +224,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print_command(command: Iterable[str]) -> None:
     print(shlex.join(list(command)))
+
+
+def _add_subtitle_style_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--subtitle-background-color",
+        help=f"burned subtitle background color in #RRGGBB, default: {DEFAULT_SUBTITLE_BACKGROUND_COLOR}",
+    )
+    parser.add_argument(
+        "--subtitle-font-color",
+        help=f"burned subtitle font color in #RRGGBB, default: {DEFAULT_SUBTITLE_FONT_COLOR}",
+    )
+    parser.add_argument(
+        "--subtitle-font-size",
+        type=int,
+        help=f"burned subtitle font size, default: {DEFAULT_SUBTITLE_FONT_SIZE}",
+    )
+
+
+def _subtitle_style_from_args(args: argparse.Namespace) -> Optional[dict]:
+    background_color = getattr(args, "subtitle_background_color", None)
+    font_color = getattr(args, "subtitle_font_color", None)
+    font_size = getattr(args, "subtitle_font_size", None)
+    if background_color is None and font_color is None and font_size is None:
+        return None
+    style = {}
+    if background_color is not None:
+        style["background_color"] = background_color
+    if font_color is not None:
+        style["font_color"] = font_color
+    if font_size is not None:
+        style["font_size"] = font_size
+    return style
 
 
 def _init(args: argparse.Namespace) -> int:
@@ -278,7 +331,7 @@ def _tts(args: argparse.Namespace) -> int:
 
 
 def _assemble(args: argparse.Namespace) -> int:
-    assemble_project(args.project, overwrite=args.overwrite)
+    assemble_project(args.project, overwrite=args.overwrite, subtitle_style=_subtitle_style_from_args(args))
     print(args.project / "assembly" / "assembly_manifest.json")
     return 0
 
@@ -302,6 +355,8 @@ def _run(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
         execute_ffmpeg=args.execute_ffmpeg,
         subtitle_output=args.subtitle_output,
+        processing_mode=args.processing_mode,
+        subtitle_style=_subtitle_style_from_args(args),
     )
     print(args.project / "validation" / "local_test_report.json")
     return 0
@@ -324,6 +379,8 @@ def _run_live(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
         execute_ffmpeg=args.execute_ffmpeg,
         subtitle_output=args.subtitle_output,
+        processing_mode=args.processing_mode,
+        subtitle_style=_subtitle_style_from_args(args),
     )
     print(args.project / "validation" / "local_test_report.json")
     return 0

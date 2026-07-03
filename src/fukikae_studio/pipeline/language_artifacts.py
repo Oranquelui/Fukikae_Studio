@@ -54,3 +54,13 @@ def soft_output_artifact(target_lang: object) -> str:
 def burned_output_artifact(target_lang: object) -> str:
     language = normalize_target_language(target_lang)
     return f"output/dubbed.{language}.burned.mp4"
+
+
+def subtitle_only_soft_output_artifact(target_lang: object) -> str:
+    language = normalize_target_language(target_lang)
+    return f"output/subtitled.{language}.mp4"
+
+
+def subtitle_only_burned_output_artifact(target_lang: object) -> str:
+    language = normalize_target_language(target_lang)
+    return f"output/subtitled.{language}.burned.mp4"

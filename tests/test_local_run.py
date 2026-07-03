@@ -169,6 +169,11 @@ def test_run_fixture_pipeline_can_render_burned_subtitle_output_only(tmp_path):
         execute_ffmpeg=True,
         media_runner=fake_media_runner,
         subtitle_output="burned",
+        subtitle_style={
+            "background_color": "#102030",
+            "font_color": "#F4EBDD",
+            "font_size": 58,
+        },
     )
 
     assert result["validation"]["status"] == "complete"
@@ -176,6 +181,51 @@ def test_run_fixture_pipeline_can_render_burned_subtitle_output_only(tmp_path):
     assert len(commands) == 2
     assert commands[-1][-1] == str(project_dir / "output" / "dubbed.ja.burned.mp4")
     assert all(command[-1] != str(project_dir / "output" / "dubbed.ja.mp4") for command in commands)
+    overlay_manifest = json.loads(
+        (project_dir / "assembly" / "subtitle_overlays" / "subtitle_overlay_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert overlay_manifest["style"]["background_color"] == "#102030"
+    assert overlay_manifest["style"]["font_color"] == "#F4EBDD"
+    assert overlay_manifest["style"]["font_size"] == 58
+
+
+def test_run_fixture_pipeline_can_render_subtitles_without_tts_or_dubbed_audio(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    source_video = tmp_path / "source.mp4"
+    fixture_audio = tmp_path / "fixture.wav"
+    source_video.write_bytes(b"fake-video")
+    fixture_audio.write_bytes(b"fake-audio")
+    project_dir = tmp_path / "demo"
+    commands = []
+
+    def fake_media_runner(command):
+        commands.append(command)
+        output_path = Path(command[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"rendered-media")
+
+    result = run_fixture_pipeline(
+        project_dir,
+        source_video=source_video,
+        stt_fixture_response=repo_root / "tests" / "fixtures" / "sample_stt_response.json",
+        dubbing_fixture_response=repo_root / "tests" / "fixtures" / "sample_dubbing_response.json",
+        fixture_audio=fixture_audio,
+        execute_ffmpeg=True,
+        media_runner=fake_media_runner,
+        subtitle_output="soft",
+        processing_mode="subtitles",
+    )
+
+    assert result["validation"]["status"] == "complete"
+    assert result["validation"]["final_output"] == "output/subtitled.ja.mp4"
+    assert not (project_dir / "tts" / "xai_tts_manifest.json").exists()
+    assert not (project_dir / "assembly" / "narration_timeline.json").exists()
+    assert (project_dir / "assembly" / "japanese_subtitles.srt").exists()
+    assert len(commands) == 1
+    assert commands[0][-1] == str(project_dir / "output" / "subtitled.ja.mp4")
+    assert "0:a:0?" in commands[0]
 
 
 def test_run_command_executes_fixture_pipeline_and_prints_validation_report(tmp_path):

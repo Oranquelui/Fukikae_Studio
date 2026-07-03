@@ -1,7 +1,10 @@
 from typing import Any, Iterable, Mapping, Optional, Tuple
 
-ASS_SAGE_GREEN_BOX = "&H40748B6E"
-ASS_TEXT_WHITE = "&H00FFFFFF"
+from fukikae_studio.media.subtitle_style import SubtitleStyleInput, normalize_subtitle_style
+
+_DEFAULT_SUBTITLE_STYLE = normalize_subtitle_style()
+ASS_SAGE_GREEN_BOX = _DEFAULT_SUBTITLE_STYLE.ass_background_color()
+ASS_TEXT_WHITE = _DEFAULT_SUBTITLE_STYLE.ass_font_color()
 
 
 def build_srt(segments: Iterable[Mapping[str, object]]) -> str:
@@ -40,7 +43,8 @@ def build_webvtt(segments: Iterable[Mapping[str, object]]) -> str:
     return "WEBVTT\n\n" + "\n".join(cues)
 
 
-def build_ass(segments: Iterable[Mapping[str, object]]) -> str:
+def build_ass(segments: Iterable[Mapping[str, object]], subtitle_style: SubtitleStyleInput = None) -> str:
+    style = normalize_subtitle_style(subtitle_style)
     header = f"""[Script Info]
 Title: FukiKae Studio Japanese subtitles
 ScriptType: v4.00+
@@ -51,7 +55,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: FukiKaeBox,Hiragino Sans,44,{ASS_TEXT_WHITE},{ASS_TEXT_WHITE},&H00000000,{ASS_SAGE_GREEN_BOX},1,0,0,0,100,100,0,0,3,8,0,2,120,120,220,1
+Style: FukiKaeBox,Hiragino Sans,{style.font_size},{style.ass_font_color()},{style.ass_font_color()},&H00000000,{style.ass_background_color()},1,0,0,0,100,100,0,0,3,8,0,2,120,120,220,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

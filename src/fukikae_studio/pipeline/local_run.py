@@ -8,17 +8,25 @@ from fukikae_studio.ai.grok_dubbing import build_grok_dubbing_payload, parse_gro
 from fukikae_studio.ai.xai_stt import STT_ENDPOINT, build_stt_fields, normalize_stt_response
 from fukikae_studio.media.audio_mix import build_narration_mix_command
 from fukikae_studio.media.ffmpeg import require_media_tool
-from fukikae_studio.media.final_mux import build_burned_subtitle_mux_command, build_project_final_mux_command
+from fukikae_studio.media.final_mux import (
+    build_burned_subtitle_mux_command,
+    build_burned_subtitle_only_mux_command,
+    build_project_final_mux_command,
+    build_project_subtitle_only_final_mux_command,
+)
+from fukikae_studio.media.subtitle_style import SubtitleStyleInput
 from fukikae_studio.media.subtitle_overlay import render_subtitle_overlay_images
 from fukikae_studio.pipeline.adapt_script import write_dubbing_artifacts
-from fukikae_studio.pipeline.assemble import assemble_project
+from fukikae_studio.pipeline.assemble import assemble_project, assemble_subtitle_only_project
 from fukikae_studio.pipeline.language_artifacts import (
     burned_output_artifact,
     dubbing_segments_artifact,
     dubbing_segments_path,
     normalize_target_language,
+    subtitle_only_burned_output_artifact,
     subtitle_artifacts,
 )
+from fukikae_studio.pipeline.processing_mode import DEFAULT_PROCESSING_MODE, is_subtitle_only_mode, normalize_processing_mode
 from fukikae_studio.pipeline.stt import write_stt_artifacts
 from fukikae_studio.pipeline.subtitle_output import (
     DEFAULT_SUBTITLE_OUTPUT,
@@ -96,9 +104,10 @@ def validate_project(
     overwrite: bool = False,
     final_output_artifact: str = FINAL_OUTPUT_ARTIFACT,
     target_lang: object = "ja",
+    processing_mode: object = DEFAULT_PROCESSING_MODE,
 ) -> dict:
     project = Path(project_dir)
-    required_artifacts = _required_local_test_artifacts(target_lang)
+    required_artifacts = _required_local_test_artifacts(target_lang, processing_mode=processing_mode)
     missing = [relative for relative in required_artifacts if not (project / relative).exists()]
     final_output_exists = (project / final_output_artifact).exists()
     status = "failed" if missing else "complete" if final_output_exists else "ready_for_final_mux"
@@ -129,9 +138,12 @@ def run_fixture_pipeline(
     execute_ffmpeg: bool = False,
     media_runner: Optional[MediaRunner] = None,
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
+    processing_mode: str = DEFAULT_PROCESSING_MODE,
+    subtitle_style: SubtitleStyleInput = None,
 ) -> dict:
     project = Path(project_dir)
     target_language = normalize_target_language(target_lang)
+    output_processing_mode = normalize_processing_mode(processing_mode)
     init_manifest = init_project(
         project,
         source_video=source_video,
@@ -166,16 +178,25 @@ def run_fixture_pipeline(
         target_lang=target_language,
     )
 
-    fixture_audio_bytes = Path(fixture_audio).read_bytes()
-    tts_manifest = synthesize_voice_segments(
-        project,
-        dubbing_segments=dubbing_segments,
-        synthesize_audio=lambda segment: fixture_audio_bytes,
-        duration_probe_ms=lambda path, segment: _duration_ms_from_segment(segment),
-        voice=voice,
-        language=target_language,
-    )
-    assembly_manifest = assemble_project(project, overwrite=overwrite)
+    tts_manifest = None
+    if is_subtitle_only_mode(output_processing_mode):
+        assembly_manifest = assemble_subtitle_only_project(
+            project,
+            target_lang=target_language,
+            overwrite=overwrite,
+            subtitle_style=subtitle_style,
+        )
+    else:
+        fixture_audio_bytes = Path(fixture_audio).read_bytes()
+        tts_manifest = synthesize_voice_segments(
+            project,
+            dubbing_segments=dubbing_segments,
+            synthesize_audio=lambda segment: fixture_audio_bytes,
+            duration_probe_ms=lambda path, segment: _duration_ms_from_segment(segment),
+            voice=voice,
+            language=target_language,
+        )
+        assembly_manifest = assemble_project(project, overwrite=overwrite, subtitle_style=subtitle_style)
     output_mode = normalize_subtitle_output(subtitle_output)
     if execute_ffmpeg:
         _execute_media_render(
@@ -184,12 +205,19 @@ def run_fixture_pipeline(
             media_runner=media_runner,
             subtitle_output=output_mode,
             target_lang=target_language,
+            processing_mode=output_processing_mode,
+            subtitle_style=subtitle_style,
         )
     validation = validate_project(
         project,
         overwrite=overwrite,
-        final_output_artifact=final_output_for_subtitle_output(output_mode, target_lang=target_language),
+        final_output_artifact=final_output_for_subtitle_output(
+            output_mode,
+            target_lang=target_language,
+            processing_mode=output_processing_mode,
+        ),
         target_lang=target_language,
+        processing_mode=output_processing_mode,
     )
     return {
         "project": str(project),
@@ -206,14 +234,27 @@ def _execute_media_render(
     media_runner: Optional[MediaRunner],
     subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
     target_lang: object = "ja",
+    processing_mode: object = DEFAULT_PROCESSING_MODE,
+    subtitle_style: SubtitleStyleInput = None,
 ) -> None:
     if media_runner is None:
         require_media_tool("ffmpeg")
     target_language = normalize_target_language(target_lang)
-    timeline = _load_json(project / "assembly" / "narration_timeline.json")
+    output_processing_mode = normalize_processing_mode(processing_mode)
     (project / "assembly").mkdir(parents=True, exist_ok=True)
     (project / "output").mkdir(parents=True, exist_ok=True)
     output_mode = normalize_subtitle_output(subtitle_output)
+    if is_subtitle_only_mode(output_processing_mode):
+        _execute_subtitle_only_media_render(
+            project,
+            overwrite=overwrite,
+            media_runner=media_runner,
+            subtitle_output=output_mode,
+            target_lang=target_language,
+            subtitle_style=subtitle_style,
+        )
+        return
+    timeline = _load_json(project / "assembly" / "narration_timeline.json")
     _run_media_command(
         build_narration_mix_command(project, timeline, overwrite=overwrite),
         media_runner=media_runner,
@@ -230,6 +271,7 @@ def _execute_media_render(
             output_dir=project / "assembly" / "subtitle_overlays",
             video_size=video_size,
             overwrite=overwrite,
+            subtitle_style=subtitle_style,
         )
         video_duration_ms = None if media_runner is not None else _probe_media_duration_ms(project / "input" / "source.mp4")
         _run_media_command(
@@ -238,6 +280,43 @@ def _execute_media_render(
                 narration_audio=project / "assembly" / "narration_track.wav",
                 subtitle_overlays=subtitle_overlays,
                 output_mp4=project / burned_output_artifact(target_language),
+                duration_ms=video_duration_ms,
+                overwrite=overwrite,
+            ),
+            media_runner=media_runner,
+        )
+
+
+def _execute_subtitle_only_media_render(
+    project: Path,
+    overwrite: bool,
+    media_runner: Optional[MediaRunner],
+    subtitle_output: str = DEFAULT_SUBTITLE_OUTPUT,
+    target_lang: object = "ja",
+    subtitle_style: SubtitleStyleInput = None,
+) -> None:
+    target_language = normalize_target_language(target_lang)
+    output_mode = normalize_subtitle_output(subtitle_output)
+    if output_mode in {"both", "soft"}:
+        _run_media_command(
+            build_project_subtitle_only_final_mux_command(project, target_lang=target_language, overwrite=overwrite),
+            media_runner=media_runner,
+        )
+    if output_mode in {"both", "burned"}:
+        video_size = (1280, 720) if media_runner is not None else _probe_video_size(project / "input" / "source.mp4")
+        subtitle_overlays = render_subtitle_overlay_images(
+            _load_json(dubbing_segments_path(project, target_language)),
+            output_dir=project / "assembly" / "subtitle_overlays",
+            video_size=video_size,
+            overwrite=overwrite,
+            subtitle_style=subtitle_style,
+        )
+        video_duration_ms = None if media_runner is not None else _probe_media_duration_ms(project / "input" / "source.mp4")
+        _run_media_command(
+            build_burned_subtitle_only_mux_command(
+                source_video=project / "input" / "source.mp4",
+                subtitle_overlays=subtitle_overlays,
+                output_mp4=project / subtitle_only_burned_output_artifact(target_language),
                 duration_ms=video_duration_ms,
                 overwrite=overwrite,
             ),
@@ -308,9 +387,23 @@ def _required_int(value: Any) -> int:
     return int(value)
 
 
-def _required_local_test_artifacts(target_lang: object) -> list[str]:
+def _required_local_test_artifacts(
+    target_lang: object,
+    processing_mode: object = DEFAULT_PROCESSING_MODE,
+) -> list[str]:
     target_language = normalize_target_language(target_lang)
     subtitles = subtitle_artifacts(target_language)
+    if is_subtitle_only_mode(processing_mode):
+        return [
+            "input/source.mp4",
+            "stt/normalized_segments.json",
+            dubbing_segments_artifact(target_language),
+            subtitles["srt"],
+            subtitles["webvtt"],
+            "assembly/subtitle_manifest.json",
+            "assembly/final_mux_plan.json",
+            "assembly/assembly_manifest.json",
+        ]
     return [
         *BASE_REQUIRED_LOCAL_TEST_ARTIFACTS[:2],
         dubbing_segments_artifact(target_language),
