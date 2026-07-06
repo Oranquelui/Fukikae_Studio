@@ -5,6 +5,8 @@ from fukikae_studio.ai.prompts import build_dubbing_prompt, default_dubbing_styl
 from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 
 RESPONSES_ENDPOINT = "/responses"
+JAPANESE_DANGLING_ENDINGS = ("が", "は", "を", "に", "で", "と", "の", "から", "ため", "そして")
+SOURCE_COMPLETE_ENDINGS = (".", "!", "?", "。", "！", "？", "」", "』", '"', "'", ")", "）")
 
 
 class JSONClient(Protocol):
@@ -208,17 +210,27 @@ def _validate_segment_ids(segments: List[object], expected_segment_ids: Iterable
 
 
 def _validate_complete_target_text(segments: List[object]) -> None:
-    dangling_endings = ("が", "は", "を", "に", "で", "と", "の", "から", "ため", "そして")
     for segment in segments:
         if not isinstance(segment, Mapping):
             continue
         text = str(segment.get("target_text", "")).strip()
         if not text:
             raise DubbingScriptError(f"Segment {segment.get('id', '<unknown>')} has empty target_text")
-        if any(text.endswith(ending) for ending in dangling_endings):
+        if _has_dangling_japanese_ending(text) and _source_segment_looks_complete(segment):
             raise DubbingScriptError(
                 f"Segment {segment.get('id', '<unknown>')} target_text is an unfinished Japanese fragment"
             )
+
+
+def _has_dangling_japanese_ending(text: str) -> bool:
+    return any(text.endswith(ending) for ending in JAPANESE_DANGLING_ENDINGS)
+
+
+def _source_segment_looks_complete(segment: Mapping[str, object]) -> bool:
+    source_text = segment.get("source_text")
+    if not isinstance(source_text, str) or not source_text.strip():
+        return True
+    return source_text.strip().endswith(SOURCE_COMPLETE_ENDINGS)
 
 
 def _is_repairable_dubbing_error(error: DubbingScriptError) -> bool:

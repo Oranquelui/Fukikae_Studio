@@ -223,6 +223,29 @@ def test_parse_grok_response_rejects_unfinished_japanese_fragments():
     assert "unfinished Japanese fragment" in str(exc_info.value)
 
 
+def test_parse_grok_response_allows_target_fragment_when_source_segment_is_also_unfinished():
+    response = {
+        "output_text": json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": "seg_0008",
+                        "source_start_ms": 7000,
+                        "source_end_ms": 8200,
+                        "source_text": "Investigators said Mendic",
+                        "target_text": "調査当局はメンディッチが",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    }
+
+    parsed = parse_grok_dubbing_response(response, expected_segment_ids=["seg_0008"])
+
+    assert parsed[0]["target_text"] == "調査当局はメンディッチが"
+
+
 def test_parse_grok_response_rejects_empty_target_text():
     response = {
         "output_text": json.dumps(
