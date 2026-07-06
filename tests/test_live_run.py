@@ -79,6 +79,9 @@ def test_run_live_pipeline_uses_real_stt_dubbing_tts_boundaries_with_injected_cl
     assert json.loads((project_dir / "script" / "japanese_dubbing_segments.json").read_text(encoding="utf-8"))[0][
         "target_text"
     ] == "こんにちは。"
+    raw_dubbing_response = json.loads((project_dir / "script" / "grok_dubbing_response.json").read_text(encoding="utf-8"))
+    assert "output_text" in raw_dubbing_response
+    assert "こんにちは。" in raw_dubbing_response["output_text"]
     assert (project_dir / "tts" / "segment_0001.mp3").read_bytes() == b"tts-audio"
     assert json.loads((project_dir / "tts" / "xai_tts_manifest.json").read_text(encoding="utf-8"))["segments"][0][
         "output_audio"

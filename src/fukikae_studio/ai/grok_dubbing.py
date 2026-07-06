@@ -1,11 +1,14 @@
 import json
 import re
-from typing import Iterable, List, Mapping, Optional, Protocol
+from typing import Iterable, List, Mapping, Optional, Protocol, Tuple
 
 from fukikae_studio.ai.prompts import build_dubbing_prompt, default_dubbing_style
 from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 
 RESPONSES_ENDPOINT = "/responses"
+DEFAULT_GROK_MAX_OUTPUT_TOKENS = 12000
+GROK_OUTPUT_TOKENS_PER_SEGMENT = 420
+GROK_MAX_OUTPUT_TOKENS_HARD_CAP = 24000
 JSON_FENCE_RE = re.compile(r"```(?:json|JSON)?\s*(.*?)\s*```", re.DOTALL)
 JAPANESE_DANGLING_ENDINGS = ("が", "は", "を", "に", "で", "と", "の", "から", "ため", "そして")
 SOURCE_COMPLETE_ENDINGS = (".", "!", "?", "。", "！", "？", "」", "』", '"', "'", ")", "）")
@@ -26,11 +29,14 @@ def build_grok_dubbing_payload(
     target_lang: str = "ja",
     style: Optional[str] = None,
     repair_instruction: str = "",
+    max_output_tokens: Optional[int] = None,
 ) -> dict:
     language = normalize_target_language(target_lang)
     dubbing_style = style or default_dubbing_style(language)
+    source_segment_list = list(source_segments)
     payload = {
         "model": model,
+        "max_output_tokens": _resolve_max_output_tokens(len(source_segment_list), max_output_tokens),
         "input": [
             {
                 "role": "system",
@@ -38,7 +44,7 @@ def build_grok_dubbing_payload(
             },
             {
                 "role": "user",
-                "content": build_dubbing_prompt(source_segments, target_lang=language, style=dubbing_style),
+                "content": build_dubbing_prompt(source_segment_list, target_lang=language, style=dubbing_style),
             },
         ],
     }
@@ -54,17 +60,21 @@ def build_grok_dubbing_review_payload(
     target_lang: str = "ja",
     style: Optional[str] = None,
     repair_instruction: str = "",
+    max_output_tokens: Optional[int] = None,
 ) -> dict:
     language = normalize_target_language(target_lang)
     dubbing_style = style or default_dubbing_style(language)
+    source_segment_list = list(source_segments)
+    candidate_segment_list = list(candidate_segments)
     review_input = {
         "target_lang": language,
         "style": dubbing_style,
-        "source_segments": list(source_segments),
-        "candidate_segments": list(candidate_segments),
+        "source_segments": source_segment_list,
+        "candidate_segments": candidate_segment_list,
     }
     payload = {
         "model": model,
+        "max_output_tokens": _resolve_max_output_tokens(len(source_segment_list), max_output_tokens),
         "input": [
             {
                 "role": "system",
@@ -101,6 +111,27 @@ def generate_dubbing_script(
     max_repair_attempts: int = 1,
     quality_review: bool = False,
 ) -> List[dict]:
+    dubbing_segments, _ = generate_dubbing_script_with_response(
+        client,
+        source_segments,
+        model=model,
+        target_lang=target_lang,
+        style=style,
+        max_repair_attempts=max_repair_attempts,
+        quality_review=quality_review,
+    )
+    return dubbing_segments
+
+
+def generate_dubbing_script_with_response(
+    client: JSONClient,
+    source_segments: Iterable[Mapping[str, object]],
+    model: str = "grok-4.3",
+    target_lang: str = "ja",
+    style: Optional[str] = None,
+    max_repair_attempts: int = 1,
+    quality_review: bool = False,
+) -> Tuple[List[dict], Mapping[str, object]]:
     language = normalize_target_language(target_lang)
     dubbing_style = style or default_dubbing_style(language)
     source_segment_list = list(source_segments)
@@ -120,7 +151,7 @@ def generate_dubbing_script(
         try:
             dubbing_segments = parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
             if quality_review:
-                return review_dubbing_script(
+                return review_dubbing_script_with_response(
                     client,
                     source_segment_list,
                     dubbing_segments,
@@ -128,7 +159,7 @@ def generate_dubbing_script(
                     target_lang=language,
                     style=dubbing_style,
                 )
-            return dubbing_segments
+            return dubbing_segments, dict(response)
         except DubbingScriptError as exc:
             if not _is_repairable_dubbing_error(exc) or attempt >= max_repair_attempts:
                 raise
@@ -145,6 +176,27 @@ def review_dubbing_script(
     style: Optional[str] = None,
     max_repair_attempts: int = 1,
 ) -> List[dict]:
+    dubbing_segments, _ = review_dubbing_script_with_response(
+        client,
+        source_segments,
+        candidate_segments,
+        model=model,
+        target_lang=target_lang,
+        style=style,
+        max_repair_attempts=max_repair_attempts,
+    )
+    return dubbing_segments
+
+
+def review_dubbing_script_with_response(
+    client: JSONClient,
+    source_segments: Iterable[Mapping[str, object]],
+    candidate_segments: Iterable[Mapping[str, object]],
+    model: str = "grok-4.3",
+    target_lang: str = "ja",
+    style: Optional[str] = None,
+    max_repair_attempts: int = 1,
+) -> Tuple[List[dict], Mapping[str, object]]:
     source_segment_list = list(source_segments)
     candidate_segment_list = list(candidate_segments)
     expected_segment_ids = [str(item["id"]) for item in source_segment_list]
@@ -162,7 +214,7 @@ def review_dubbing_script(
         if not isinstance(response, Mapping):
             raise DubbingScriptError("Grok dubbing review response must be an object")
         try:
-            return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids)
+            return parse_grok_dubbing_response(response, expected_segment_ids=expected_segment_ids), dict(response)
         except DubbingScriptError as exc:
             if not _is_repairable_dubbing_error(exc) or attempt >= max_repair_attempts:
                 raise
@@ -234,7 +286,8 @@ def _parse_embedded_json_object(output_text: str) -> Optional[Mapping[str, objec
             continue
         if not isinstance(payload, Mapping):
             raise DubbingScriptError("Grok dubbing response must be a JSON object")
-        return payload
+        if "segments" in payload:
+            return payload
     return None
 
 
@@ -286,6 +339,9 @@ def _is_repairable_dubbing_error(error: DubbingScriptError) -> bool:
         "unfinished Japanese fragment" in detail
         or "empty target_text" in detail
         or "not strict JSON" in detail
+        or "segments list" in detail
+        or "missing segment IDs" in detail
+        or "extra segment IDs" in detail
     )
 
 
@@ -294,8 +350,16 @@ def _repair_instruction(error: Optional[DubbingScriptError]) -> str:
     return (
         "Repair only the invalid dubbing script. Return the full strict JSON again with the same segment IDs. "
         f"Fix this validation error: {detail}. "
+        'The top-level object must contain a "segments" list. '
         "Every target_text must be non-empty and complete. Japanese target_text must not end with dangling particles."
     )
+
+
+def _resolve_max_output_tokens(segment_count: int, requested_max_output_tokens: Optional[int]) -> int:
+    if requested_max_output_tokens is not None:
+        return int(requested_max_output_tokens)
+    estimated_budget = segment_count * GROK_OUTPUT_TOKENS_PER_SEGMENT
+    return min(GROK_MAX_OUTPUT_TOKENS_HARD_CAP, max(DEFAULT_GROK_MAX_OUTPUT_TOKENS, estimated_budget))
 
 
 def _build_review_prompt(review_input: Mapping[str, object]) -> str:

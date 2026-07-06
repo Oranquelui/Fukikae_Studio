@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import fukikae_studio.ai.grok_dubbing as grok_dubbing
 from fukikae_studio.ai.grok_dubbing import (
     DubbingScriptError,
     build_grok_dubbing_payload,
@@ -154,6 +155,18 @@ def test_build_payload_uses_responses_endpoint_shape_and_grok_model():
     assert "seg_0001" in payload["input"][1]["content"]
 
 
+def test_build_payload_sets_large_responses_output_budget_for_full_segment_json():
+    payload = build_grok_dubbing_payload(load_segments(), model="grok-4.3")
+
+    assert payload["max_output_tokens"] >= 12000
+
+
+def test_build_review_payload_sets_large_responses_output_budget_for_full_segment_json():
+    payload = build_grok_dubbing_review_payload(load_segments(), load_segments(), model="grok-4.3")
+
+    assert payload["max_output_tokens"] >= 12000
+
+
 def test_parse_grok_response_to_japanese_dubbing_segments_and_validate_ids():
     parsed = parse_grok_dubbing_response(load_response(), expected_segment_ids=["seg_0001", "seg_0002"])
 
@@ -201,6 +214,21 @@ def test_parse_grok_response_accepts_json_fenced_output_text():
     parsed = parse_grok_dubbing_response(response, expected_segment_ids=["seg_0001"])
 
     assert parsed[0]["target_text"] == "こんにちは。"
+
+
+def test_parse_grok_response_rejects_truncated_top_level_json_without_salvaging_nested_segment():
+    response = {
+        "output_text": (
+            '{"segments":['
+            '{"id":"seg_0001","target_text":"こんにちは。"},'
+            '{"id":"seg_0002","target_text":"途中'
+        )
+    }
+
+    with pytest.raises(DubbingScriptError) as exc_info:
+        parse_grok_dubbing_response(response, expected_segment_ids=["seg_0001", "seg_0002"])
+
+    assert "not strict JSON" in str(exc_info.value)
 
 
 def test_parse_grok_response_rejects_missing_or_extra_segment_ids():
@@ -330,6 +358,38 @@ def test_generate_dubbing_script_retries_once_for_non_strict_json():
     assert result[0]["target_text"] == "こんにちは。"
     assert len(client.calls) == 2
     assert "not strict JSON" in client.calls[1]["payload"]["input"][-1]["content"]
+
+
+def test_generate_dubbing_script_retries_once_for_missing_segments_list():
+    bad_response = {
+        "output_text": json.dumps(
+            {"translations": [{"id": "seg_0001", "target_text": "こんにちは。"}]},
+            ensure_ascii=False,
+        )
+    }
+    repaired_response = {
+        "output_text": json.dumps(
+            {"segments": [{"id": "seg_0001", "target_text": "こんにちは。"}]},
+            ensure_ascii=False,
+        )
+    }
+    client = FakeXAIClient([bad_response, repaired_response])
+
+    result = generate_dubbing_script(client, [{"id": "seg_0001", "source_start_ms": 0, "source_end_ms": 1200}])
+
+    assert result[0]["target_text"] == "こんにちは。"
+    assert len(client.calls) == 2
+    assert "segments list" in client.calls[1]["payload"]["input"][-1]["content"]
+
+
+def test_generate_dubbing_script_with_response_returns_raw_success_response():
+    response = load_response()
+    client = FakeXAIClient(response)
+
+    segments, raw_response = grok_dubbing.generate_dubbing_script_with_response(client, load_segments(), model="grok-4.3")
+
+    assert segments[0]["id"] == "seg_0001"
+    assert raw_response == response
 
 
 def test_build_review_payload_compares_source_and_candidate_segments():

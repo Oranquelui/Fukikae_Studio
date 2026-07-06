@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
 
-from fukikae_studio.ai.grok_dubbing import build_grok_dubbing_payload, generate_dubbing_script
+from fukikae_studio.ai.grok_dubbing import build_grok_dubbing_payload, generate_dubbing_script_with_response
 from fukikae_studio.ai.xai_stt import STT_ENDPOINT, build_stt_fields, normalize_stt_response, transcribe_audio_bytes
 from fukikae_studio.ai.xai_tts import synthesize_tts_audio
 from fukikae_studio.config import DEFAULT_XAI_TTS_VOICE
@@ -106,7 +106,7 @@ def run_live_pipeline(
         normalized_segments=normalized_segments,
     )
 
-    dubbing_segments = generate_dubbing_script(
+    dubbing_segments, raw_dubbing_response = generate_dubbing_script_with_response(
         client,
         normalized_segments,
         model=text_model,
@@ -116,7 +116,7 @@ def run_live_pipeline(
     write_dubbing_artifacts(
         project,
         request_payload=build_grok_dubbing_payload(normalized_segments, model=text_model, target_lang=target_language),
-        raw_response={"source": "xai-responses", "segments_count": len(dubbing_segments)},
+        raw_response=raw_dubbing_response,
         dubbing_segments=dubbing_segments,
         target_lang=target_language,
     )
