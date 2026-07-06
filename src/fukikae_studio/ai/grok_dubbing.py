@@ -1,10 +1,12 @@
 import json
+import re
 from typing import Iterable, List, Mapping, Optional, Protocol
 
 from fukikae_studio.ai.prompts import build_dubbing_prompt, default_dubbing_style
 from fukikae_studio.pipeline.language_artifacts import normalize_target_language
 
 RESPONSES_ENDPOINT = "/responses"
+JSON_FENCE_RE = re.compile(r"```(?:json|JSON)?\s*(.*?)\s*```", re.DOTALL)
 JAPANESE_DANGLING_ENDINGS = ("が", "は", "を", "に", "で", "と", "の", "から", "ため", "そして")
 SOURCE_COMPLETE_ENDINGS = (".", "!", "?", "。", "！", "？", "」", "』", '"', "'", ")", "）")
 
@@ -81,10 +83,7 @@ def build_grok_dubbing_review_payload(
 
 def parse_grok_dubbing_response(response: Mapping[str, object], expected_segment_ids: Iterable[str]) -> List[dict]:
     output_text = _extract_output_text(response)
-    try:
-        payload = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise DubbingScriptError("Grok dubbing response was not strict JSON") from exc
+    payload = _parse_output_payload(output_text)
     segments = payload.get("segments")
     if not isinstance(segments, list):
         raise DubbingScriptError("Grok dubbing response must contain a segments list")
@@ -191,6 +190,54 @@ def _extract_output_text(response: Mapping[str, object]) -> str:
     raise DubbingScriptError("Grok dubbing response did not include output_text")
 
 
+def _parse_output_payload(output_text: str) -> Mapping[str, object]:
+    candidates = _json_payload_candidates(output_text)
+    last_error: Optional[json.JSONDecodeError] = None
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if not isinstance(payload, Mapping):
+            raise DubbingScriptError("Grok dubbing response must be a JSON object")
+        return payload
+    embedded_payload = _parse_embedded_json_object(output_text)
+    if embedded_payload is not None:
+        return embedded_payload
+    if last_error is not None:
+        raise DubbingScriptError("Grok dubbing response was not strict JSON") from last_error
+    raise DubbingScriptError("Grok dubbing response was not strict JSON")
+
+
+def _json_payload_candidates(output_text: str) -> List[str]:
+    candidates: List[str] = []
+    _append_unique_candidate(candidates, output_text.strip())
+    for match in JSON_FENCE_RE.finditer(output_text):
+        _append_unique_candidate(candidates, match.group(1).strip())
+    return candidates
+
+
+def _append_unique_candidate(candidates: List[str], candidate: str) -> None:
+    if candidate and candidate not in candidates:
+        candidates.append(candidate)
+
+
+def _parse_embedded_json_object(output_text: str) -> Optional[Mapping[str, object]]:
+    decoder = json.JSONDecoder()
+    for start_index, char in enumerate(output_text):
+        if char != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(output_text[start_index:])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, Mapping):
+            raise DubbingScriptError("Grok dubbing response must be a JSON object")
+        return payload
+    return None
+
+
 def _validate_segment_ids(segments: List[object], expected_segment_ids: Iterable[str]) -> None:
     expected = [str(segment_id) for segment_id in expected_segment_ids]
     actual = []
@@ -235,7 +282,11 @@ def _source_segment_looks_complete(segment: Mapping[str, object]) -> bool:
 
 def _is_repairable_dubbing_error(error: DubbingScriptError) -> bool:
     detail = str(error)
-    return "unfinished Japanese fragment" in detail or "empty target_text" in detail
+    return (
+        "unfinished Japanese fragment" in detail
+        or "empty target_text" in detail
+        or "not strict JSON" in detail
+    )
 
 
 def _repair_instruction(error: Optional[DubbingScriptError]) -> str:

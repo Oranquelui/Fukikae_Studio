@@ -191,6 +191,18 @@ def test_parse_grok_response_supports_official_responses_output_shape():
     assert parsed[0]["target_text"] == "こんにちは。"
 
 
+def test_parse_grok_response_accepts_json_fenced_output_text():
+    response = {
+        "output_text": """```json
+{"segments":[{"id":"seg_0001","target_text":"こんにちは。"}]}
+```"""
+    }
+
+    parsed = parse_grok_dubbing_response(response, expected_segment_ids=["seg_0001"])
+
+    assert parsed[0]["target_text"] == "こんにちは。"
+
+
 def test_parse_grok_response_rejects_missing_or_extra_segment_ids():
     response = {"output_text": '{"segments":[{"id":"seg_0001","target_text":"こんにちは"}]}'}
 
@@ -301,6 +313,23 @@ def test_generate_dubbing_script_retries_once_for_unfinished_japanese_fragments(
     assert result[0]["target_text"] == "調査当局はメンディッチの出国を確認しました。"
     assert len(client.calls) == 2
     assert "Repair only the invalid dubbing script" in client.calls[1]["payload"]["input"][-1]["content"]
+
+
+def test_generate_dubbing_script_retries_once_for_non_strict_json():
+    bad_response = {"output_text": "Here is the corrected script, but not as JSON."}
+    repaired_response = {
+        "output_text": json.dumps(
+            {"segments": [{"id": "seg_0001", "target_text": "こんにちは。"}]},
+            ensure_ascii=False,
+        )
+    }
+    client = FakeXAIClient([bad_response, repaired_response])
+
+    result = generate_dubbing_script(client, [{"id": "seg_0001", "source_start_ms": 0, "source_end_ms": 1200}])
+
+    assert result[0]["target_text"] == "こんにちは。"
+    assert len(client.calls) == 2
+    assert "not strict JSON" in client.calls[1]["payload"]["input"][-1]["content"]
 
 
 def test_build_review_payload_compares_source_and_candidate_segments():
